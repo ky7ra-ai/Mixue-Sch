@@ -7,6 +7,20 @@
   const $app = document.getElementById('app');
   const $toast = document.getElementById('toast');
 
+  /* ---------- mode aplikasi Android (Capacitor) ---------- */
+  const isNative = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
+  if (isNative) document.documentElement.classList.add('native');
+  async function nativeShare(title, text) {
+    try {
+      const sharePlugin = window.Capacitor.Plugins && window.Capacitor.Plugins.Share;
+      if (!sharePlugin) throw new Error('no share');
+      await sharePlugin.share({ title, text, dialogTitle: 'Bagikan jadwal' });
+    } catch (e) {
+      if (e && /cancel/i.test(String(e.message || e))) return;
+      copyText(text);
+    }
+  }
+
   /* ---------- util ---------- */
   const pad = (n) => String(n).padStart(2, '0');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -204,7 +218,9 @@
         h += '<p class="muted small no-print">Minggu depan belum dibuat, jadi kasir pagi hari Minggu masih bebas dan akan menyesuaikan siapa yang libur Senin depan.</p>';
       }
       h += '<div class="row no-print" style="margin-top:8px"><button data-action="copy:' + i + '">📋 Salin teks</button>' +
-        '<button data-action="csv:' + i + '">⬇ Unduh CSV</button><button data-action="print">🖨 Cetak</button></div>';
+        (isNative
+          ? '<button class="primary" data-action="share:' + i + '">📤 Bagikan (WhatsApp, dll)</button>'
+          : '<button data-action="csv:' + i + '">⬇ Unduh CSV</button><button data-action="print">🖨 Cetak</button>') + '</div>';
     }
     h += '</section>';
     return h;
@@ -248,7 +264,8 @@
     document.querySelectorAll('details.card').forEach((d, i) => { open[i] = d.open; });
     let h = '<div class="topbar"><div class="brand"><div class="logo" aria-hidden="true">M</div><div><h1>Mixue Sch</h1>' +
       '<div class="sub">Penjadwal shift otomatis · 5 orang · Pagi, Siang, Middle</div></div></div>' +
-      '<div class="row no-print"><button class="primary" data-action="addweek">+ Tambah minggu</button><button data-action="print">🖨 Cetak</button></div></div>';
+      '<div class="row no-print"><button class="primary" data-action="addweek">+ Tambah minggu</button>' +
+      (isNative ? '' : '<button data-action="print">🖨 Cetak</button>') + '</div></div>';
     h += '<p class="muted no-print">Pilih siapa yang libur di tiap hari (Senin–Jumat), sistem menyusun sisanya otomatis. Atau tekan “Isi libur otomatis”.</p>';
     if (!namesValid()) {
       h += '<div class="msg err">Nama kelima orang harus terisi dan tidak boleh sama. Perbaiki di bagian Pengaturan.</div>';
@@ -358,6 +375,7 @@
       case 'addreq': state.weeks[i].requests.push({ p: 0, day: 0, shift: 'Pagi' }); save(); render(); break;
       case 'delreq': state.weeks[i].requests.splice(Number(b), 1); save(); render(); break;
       case 'copy': copyText(weekText(i)); break;
+      case 'share': nativeShare('Jadwal Mixue Sch', weekText(i)); break;
       case 'csv': download('jadwal-' + S.addDays(state.startDate, i * 7) + '.csv', weekCsv(i), 'text/csv;charset=utf-8'); break;
       case 'print': window.print(); break;
       case 'reset':

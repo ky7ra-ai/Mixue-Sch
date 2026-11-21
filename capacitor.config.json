@@ -1,0 +1,8 @@
+{
+  "appId": "com.mixue.sch",
+  "appName": "Mixue Sch",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}

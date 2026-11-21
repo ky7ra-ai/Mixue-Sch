@@ -27,6 +27,17 @@ Data tersimpan di browser (localStorage). Nama bisa diubah di bagian Pengaturan.
   Jumat → Senin dan Senin → Kamis/Jumat ditolak. Bisa diubah di Pengaturan.
 - Karena yang libur Jumat wajib Kasir Siang hari Sabtu, ia tidak bisa jadi Middle minggu itu.
 
+## APK Android
+
+APK dibuild otomatis oleh GitHub Actions (`.github/workflows/release-apk.yml`) memakai Capacitor.
+Tiap tag `v*` (mis. `v1.0.1`) menghasilkan rilis baru di tab **Releases** berisi file `Mixue-Sch-vX.Y.Z.apk`.
+Bisa juga dijalankan manual lewat Actions → Build & Release APK → Run workflow.
+
+Instal: unduh APK di HP → buka → izinkan instal dari sumber tidak dikenal bila diminta.
+
+APK ditandatangani dengan `signing/mixue-sch.jks` (ikut di repo, khusus instal sideload pribadi) agar
+versi baru bisa menimpa versi lama tanpa uninstall. Jangan dipakai untuk Play Store.
+
 ## Struktur
 
 ```
@@ -34,6 +45,9 @@ index.html          halaman utama
 css/style.css       tampilan
 js/scheduler.js     mesin penjadwalan (jalan di browser dan Node)
 js/app.js           antarmuka
+capacitor.config.json, package.json, scripts/   pembungkus APK
+signing/            keystore penandatangan APK
+.github/workflows/  build & release APK
 test/               tes otomatis
 ```
 
