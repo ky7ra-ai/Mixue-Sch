@@ -23,11 +23,17 @@ test('semua 120 kombinasi libur menghasilkan jadwal valid (tanpa minggu depan)',
 });
 
 test('semua kombinasi libur + Senin depan valid (Minggu kasir pagi = libur Senin depan)', () => {
-  let bad = [], checked = 0;
+  let bad = [], checked = 0, conflicts = 0;
   for (const off of ALL_OFF) {
     for (const nm of PEOPLE) {
       const r = S.solveWeek({ people: PEOPLE, off, prev: null, nextMondayOff: nm, middleHistory: ['Ahmad'], requests: [] });
       checked++;
+      if (nm === off[4]) {
+        // libur Jumat = libur Senin depan: Sabtu wajib kasir siang tapi Minggu wajib kasir pagi -> mustahil
+        conflicts++;
+        if (r.ok || !/libur Jumat dan Senin depan/.test(r.error)) bad.push('harusnya ditolak: ' + off.join(',') + ' next=' + nm);
+        continue;
+      }
       if (!r.ok) { bad.push(off.join(',') + ' next=' + nm + ' => ' + r.error); continue; }
       const v = S.auditWeek(PEOPLE, r, nm);
       if (v.length) bad.push(off.join(',') + ' next=' + nm + ' => ' + v.join('; '));
@@ -35,7 +41,39 @@ test('semua kombinasi libur + Senin depan valid (Minggu kasir pagi = libur Senin
     }
   }
   assert.strictEqual(checked, 600);
+  assert.strictEqual(conflicts, 120);
   assert.deepStrictEqual(bad.slice(0, 5), []);
+});
+
+test('Sabtu-Minggu: pasangan tetap, shift bergantian, tugas bergantian', () => {
+  const swap = { PK: 'SP', PP: 'SK', SK: 'PP', SP: 'PK' };
+  let checked = 0;
+  for (const off of ALL_OFF) {
+    const r = S.solveWeek({ people: PEOPLE, off, nextMondayOff: null, middleHistory: [], requests: [] });
+    assert.ok(r.ok);
+    const sat = r.days[5], sun = r.days[6];
+    // Sabtu Pagi (kasir X, piket Y) -> Minggu Siang (X piket, Y kasir); Sabtu Siang -> Minggu Pagi
+    assert.strictEqual(sun.SP, sat.PK); assert.strictEqual(sun.SK, sat.PP);
+    assert.strictEqual(sun.PP, sat.SK); assert.strictEqual(sun.PK, sat.SP);
+    PEOPLE.forEach((n) => {
+      if (n === r.middle) return;
+      assert.strictEqual(r.assign[n][6], swap[r.assign[n][5]]);
+      checked++;
+    });
+    // jatah mingguan tetap 3 Pagi + 3 Siang (Middle: 2 + 2)
+    PEOPLE.forEach((n) => {
+      const st = r.stats[n];
+      if (n === r.middle) assert.deepStrictEqual([st.Pagi, st.Siang, st.Middle], [2, 2, 2]);
+      else assert.deepStrictEqual([st.Pagi, st.Siang, st.Middle], [3, 3, 0]);
+    });
+  }
+  assert.strictEqual(checked, 480);
+});
+
+test('libur Jumat = libur Senin depan ditolak dengan pesan jelas', () => {
+  const r = S.solveWeek({ people: PEOPLE, off: ['Ahmad', 'Ferri', 'Budi', 'Tamam', 'Ainun'], nextMondayOff: 'Ainun', middleHistory: [], requests: [] });
+  assert.ok(!r.ok);
+  assert.match(r.error, /Ainun libur Jumat dan Senin depan/);
 });
 
 test('aturan jarak libur: Jumat->Senin terlalu dekat, Senin->Kamis/Jumat terlalu jauh', () => {

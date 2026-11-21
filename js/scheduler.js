@@ -8,6 +8,7 @@
  *  - Senin-Jumat : Pagi (Kasir + Piket), Siang (Kasir + Piket), 1 orang libur.
  *  - Sabtu-Minggu: Pagi (Kasir + Piket), Middle (1 orang), Siang (Kasir + Piket).
  *  - Middle Sabtu & Minggu orang yang sama, dirotasi tiap minggu.
+ *  - Sabtu-Minggu: pasangan tetap sama, shift bergantian (Pagi<->Siang) dan tugas bergantian (Kasir<->Piket).
  *  - Sehari sebelum libur wajib Pagi (Kasir); sehari setelah libur wajib Siang (Kasir).
  *    Rolling antar minggu: Minggu kasir pagi = yang libur Senin depan.
  *    Libur Jumat -> Sabtu kasir siang, jadi Middle bukan orang yang libur Jumat.
@@ -108,6 +109,23 @@
     return { people, offIdx, offDay, nextMon, forcedPK, forcedSK, prevSunday };
   }
 
+  function reqOk(codes, r) {
+    const c = codes[r.p];
+    if (r.shift === 'Pagi') return isPagi(c);
+    if (r.shift === 'Siang') return isSiang(c);
+    if (r.shift === 'Middle') return c === 'M';
+    return true;
+  }
+
+  function optionOf(codes) {
+    const pagi = [], siang = [];
+    for (let p = 0; p < N; p++) {
+      if (isPagi(codes[p])) pagi.push(p);
+      else if (isSiang(codes[p])) siang.push(p);
+    }
+    return { codes, pagi, siang };
+  }
+
   function buildDayOptions(ctx, M, reqs) {
     const out = [];
     for (let d = 0; d < 7; d++) {
@@ -124,26 +142,25 @@
         for (let i = 0; i < 4; i++) codes[W[i]] = SLOTS4[perm[i]];
         if (ctx.forcedPK[d] >= 0 && codes[ctx.forcedPK[d]] !== 'PK') continue;
         if (ctx.forcedSK[d] >= 0 && codes[ctx.forcedSK[d]] !== 'SK') continue;
-        let ok = true;
-        for (const r of reqs) {
-          if (r.d !== d) continue;
-          const c = codes[r.p];
-          if (r.shift === 'Pagi' && !isPagi(c)) ok = false;
-          else if (r.shift === 'Siang' && !isSiang(c)) ok = false;
-          else if (r.shift === 'Middle' && c !== 'M') ok = false;
-          if (!ok) break;
-        }
-        if (!ok) continue;
-        const pagi = [], siang = [];
-        for (let p = 0; p < N; p++) {
-          if (isPagi(codes[p])) pagi.push(p);
-          else if (isSiang(codes[p])) siang.push(p);
-        }
-        list.push({ codes, pagi, siang });
+        if (reqs.some((r) => r.d === d && !reqOk(codes, r))) continue;
+        list.push(optionOf(codes));
       }
       out.push(list);
     }
     return out;
+  }
+
+  /*
+   * Aturan Sabtu-Minggu: pasangan tetap sama, shift bergantian (Sabtu Pagi -> Minggu Siang dan sebaliknya),
+   * dan tugas bergantian (Sabtu Kasir -> Minggu Piket dan sebaliknya).
+   * Jadi Minggu = Sabtu dengan Pagi Kasir<->Siang Piket dan Pagi Piket<->Siang Kasir. Middle tetap.
+   */
+  const SWAP = { PK: 'SP', PP: 'SK', SK: 'PP', SP: 'PK', M: 'M' };
+  function sundayFromSaturday(ctx, reqs, sat) {
+    const codes = sat.codes.map((c) => SWAP[c]);
+    if (ctx.forcedPK[6] >= 0 && codes[ctx.forcedPK[6]] !== 'PK') return null;
+    if (reqs.some((r) => r.d === 6 && !reqOk(codes, r))) return null;
+    return optionOf(codes);
   }
 
   function scoreSolution(ctx, chosen) {
@@ -165,35 +182,46 @@
   // Cari susunan terbaik untuk 1 kandidat Middle. null jika tidak ada.
   function searchMiddle(ctx, M, reqs, firstOnly) {
     const opts = buildDayOptions(ctx, M, reqs);
-    if (opts.some((l) => l.length === 0)) return null;
+    if (opts.slice(0, 6).some((l) => l.length === 0)) return null;
     const target = [0, 1, 2, 3, 4].map((p) => (p === M ? 2 : 3));
     const pg = [0, 0, 0, 0, 0];
     const sg = [0, 0, 0, 0, 0];
     const chosen = new Array(7);
     let best = null, bestScore = Infinity, nodes = 0;
-    const LIMIT = 600000;
+    const LIMIT = 800000;
     let stop = false;
+    // mulai dari akhir pekan (paling terikat aturan), lalu Senin..Jumat
+    const order = [5, 0, 1, 2, 3, 4];
 
-    function dfs(d) {
+    function add(opt) {
+      let ok = true;
+      for (let i = 0; i < opt.pagi.length; i++) if (++pg[opt.pagi[i]] > target[opt.pagi[i]]) ok = false;
+      for (let i = 0; i < opt.siang.length; i++) if (++sg[opt.siang[i]] > target[opt.siang[i]]) ok = false;
+      return ok;
+    }
+    function undo(opt) {
+      for (let i = 0; i < opt.pagi.length; i++) pg[opt.pagi[i]]--;
+      for (let i = 0; i < opt.siang.length; i++) sg[opt.siang[i]]--;
+    }
+
+    function dfs(step) {
       if (stop) return;
-      if (d === 7) {
+      if (step === order.length) {
         const sc = firstOnly ? 0 : scoreSolution(ctx, chosen);
         if (sc < bestScore) { bestScore = sc; best = chosen.map((o) => o.codes.slice()); }
         if (firstOnly) stop = true;
         return;
       }
+      const d = order[step];
       for (const opt of opts[d]) {
         if (++nodes > LIMIT) { stop = true; return; }
-        let ok = true, i;
-        for (i = 0; i < opt.pagi.length; i++) {
-          if (++pg[opt.pagi[i]] > target[opt.pagi[i]]) ok = false;
-        }
-        for (let j = 0; j < opt.siang.length; j++) {
-          if (++sg[opt.siang[j]] > target[opt.siang[j]]) ok = false;
-        }
-        if (ok) { chosen[d] = opt; dfs(d + 1); }
-        for (i = 0; i < opt.pagi.length; i++) pg[opt.pagi[i]]--;
-        for (let j = 0; j < opt.siang.length; j++) sg[opt.siang[j]]--;
+        let sun = null;
+        if (d === 5) { sun = sundayFromSaturday(ctx, reqs, opt); if (!sun) continue; }
+        const ok1 = add(opt);
+        const ok2 = sun ? add(sun) : true;
+        if (ok1 && ok2) { chosen[d] = opt; if (sun) chosen[6] = sun; dfs(step + 1); }
+        if (sun) undo(sun);
+        undo(opt);
         if (stop) return;
       }
     }
@@ -264,6 +292,7 @@
     if (req.shift === 'Middle' && req.d < 5) return 'Middle hanya ada di Sabtu & Minggu';
     if (req.shift === 'Siang' && ctx.forcedPK[req.d] === req.p) return 'sehari sebelum libur wajib masuk Pagi';
     if (req.shift === 'Pagi' && ctx.forcedSK[req.d] === req.p) return 'sehari setelah libur wajib masuk Siang';
+    if (req.d >= 5) return 'bertabrakan dengan aturan Sabtu–Minggu (pasangan tetap, shift & tugas bergantian) atau aturan lain';
     return 'bertabrakan dengan aturan lain (jatah 3x Pagi/3x Siang, kasir sebelum/sesudah libur, atau request lain)';
   }
 
@@ -281,6 +310,9 @@
     const chk = checkOff(people, params.off);
     if (!chk.complete) {
       return { ok: false, error: chk.errors.length ? chk.errors.join('; ') : 'Lengkapi dulu hari libur kelima orang (Senin–Jumat).' };
+    }
+    if (params.nextMondayOff && params.nextMondayOff === params.off[4]) {
+      return { ok: false, error: params.nextMondayOff + ' libur Jumat dan Senin depan: Sabtu wajib kasir siang, tapi Minggu wajib kasir pagi (bertabrakan dengan aturan Sabtu–Minggu bergantian). Ubah salah satu hari libur.' };
     }
     const ctx = prepare(params);
     const rejected = [];
@@ -372,6 +404,11 @@
       if (d >= 1 && A[n][d - 1] !== 'PK') v.push(n + ' sebelum libur bukan Kasir Pagi');
       if (d <= 3 && A[n][d + 1] !== 'SK') v.push(n + ' setelah libur bukan Kasir Siang');
       if (d === 4 && A[n][5] !== 'SK') v.push(n + ' setelah libur Jumat bukan Kasir Siang (Sabtu)');
+    });
+    people.forEach((n) => {
+      if (n === res.middle) return;
+      const sw = { PK: 'SP', PP: 'SK', SK: 'PP', SP: 'PK' }[A[n][5]];
+      if (A[n][6] !== sw) v.push(n + ' Sabtu ' + A[n][5] + ' tapi Minggu ' + A[n][6] + ' (harus ' + sw + ': shift & tugas bergantian)');
     });
     if (nextMondayOff && A[nextMondayOff][6] !== 'PK') v.push(nextMondayOff + ' Minggu bukan Kasir Pagi padahal libur Senin depan');
     return v;

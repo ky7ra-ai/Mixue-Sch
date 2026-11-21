@@ -57,7 +57,7 @@
   function defaultState() {
     return {
       version: 1,
-      people: ['Ahmad', 'Ferri', 'Budi', 'Tamam', 'Ainun'],
+      people: ['', '', '', '', ''],
       settings: { minGap: S.DEFAULT_SETTINGS.minGap, maxGap: S.DEFAULT_SETTINGS.maxGap },
       baseline: { prevOff: [null, null, null, null, null], prevMiddle: null },
       startDate: S.snapToMonday(todayISO()),
@@ -69,6 +69,8 @@
     try {
       const s = JSON.parse(localStorage.getItem(KEY) || 'null');
       if (s && s.version === 1 && Array.isArray(s.people) && s.people.length === 5 && Array.isArray(s.weeks) && s.weeks.length) {
+        // data versi lama memakai 5 nama bawaan: mulai bersih agar tidak ada nama otomatis
+        if (s.people.join('|') === 'Ahmad|Ferri|Budi|Tamam|Ainun') return defaultState();
         if (s.me === undefined || s.me === null || !(s.me >= 0 && s.me < 5)) s.me = null;
         return s;
       }
@@ -78,7 +80,7 @@
   function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* abaikan */ } }
   let state = load();
 
-  const ui = { tab: 'me', sel: 0, selDay: null, nameDraft: '', nameError: '' };
+  const ui = { tab: 'me', sel: 0, selDay: null, nameDraft: '', nameError: '', step: 'welcome', myName: '', peopleDraft: ['', '', '', '', ''] };
   function currentWeekIndex() {
     const diff = Math.floor((S.parseDate(todayISO()) - S.parseDate(state.startDate)) / 864e5 / 7);
     return Math.max(0, Math.min(state.weeks.length - 1, diff));
@@ -322,6 +324,7 @@
       '<li>Senin–Jumat: Pagi (Kasir + Piket), Siang (Kasir + Piket), 1 orang libur.</li>' +
       '<li>Sabtu–Minggu: Pagi (Kasir + Piket), Middle, Siang (Kasir + Piket).</li>' +
       '<li>Middle Sabtu & Minggu orang yang sama, dirotasi tiap minggu.</li>' +
+      '<li>Sabtu–Minggu: pasangan tetap sama, shift bergantian (Sabtu Pagi → Minggu Siang, dan sebaliknya), tugas juga bergantian (Kasir ↔ Piket).</li>' +
       '<li>Sehari sebelum libur wajib Pagi (Kasir); sehari setelah libur wajib Siang (Kasir).</li>' +
       '<li>Yang kasir pagi hari Minggu = yang libur Senin berikutnya.</li>' +
       '<li>Yang dapat Middle 2x Pagi + 2x Siang; lainnya 3x Pagi + 3x Siang.</li>' +
@@ -334,12 +337,30 @@
     const n = names();
     let h = '<div class="onb"><div class="logo" aria-hidden="true">M</div><div><h1>Halo! Siapa namamu?</h1>' +
       '<p class="muted" style="margin:6px 0 0">Ketik namamu, lalu jadwalmu minggu ini langsung tampil.</p></div>' +
-      '<input type="text" id="nameInput" data-field="nameDraft" placeholder="Contoh: ' + esc(n[1] || n[0]) + '" autocomplete="off" autocapitalize="words" value="' + esc(ui.nameDraft) + '">';
+      '<input type="text" id="nameInput" data-field="nameDraft" placeholder="Ketik namamu" autocomplete="off" autocapitalize="words" value="' + esc(ui.nameDraft) + '">';
     if (ui.nameError) h += '<div class="msg err">' + esc(ui.nameError) + '</div>';
     h += '<div class="chips">' + n.map((x, i) => '<button data-action="pick:' + i + '">' + esc(x) + '</button>').join('') + '</div>' +
       '<button class="primary" data-action="submitname" style="padding:12px">Lanjut</button>' +
       '<details class="card" style="margin:6px 0 0"><summary>Namamu tidak ada? Ubah daftar nama</summary>' + nameInputs() + '</details></div>';
     return h;
+  }
+  function viewWelcome() {
+    let h = '<div class="onb"><div class="logo" aria-hidden="true">M</div><div><h1>Halo! Siapa namamu?</h1>' +
+      '<p class="muted" style="margin:6px 0 0">Setelah ini kamu mengisi nama semua orang yang masuk jadwal.</p></div>' +
+      '<input type="text" id="nameInput" data-field="nameDraft" placeholder="Ketik namamu" autocomplete="off" autocapitalize="words" value="' + esc(ui.nameDraft) + '">';
+    if (ui.nameError) h += '<div class="msg err">' + esc(ui.nameError) + '</div>';
+    return h + '<button class="primary" data-action="welcomenext" style="padding:12px">Lanjut</button></div>';
+  }
+  function viewPeople() {
+    let h = '<div class="onb"><div class="logo" aria-hidden="true">M</div><div><h1>Siapa saja di jadwal?</h1>' +
+      '<p class="muted" style="margin:6px 0 0">Isi nama kelima orang yang akan diatur jadwalnya, termasuk kamu (<b>' + esc(ui.myName) + '</b>).</p></div><div class="grid2">';
+    ui.peopleDraft.forEach((v, i) => {
+      h += '<label class="field">Orang ' + (i + 1) + '<input type="text" data-field="pd:' + i + '" placeholder="Nama orang ' + (i + 1) + '" maxlength="30" autocomplete="off" autocapitalize="words" value="' + esc(v) + '"></label>';
+    });
+    h += '</div>';
+    if (ui.nameError) h += '<div class="msg err">' + esc(ui.nameError) + '</div>';
+    return h + '<div class="row"><button class="ghost" data-action="peopleback">Kembali</button>' +
+      '<button class="primary" data-action="savepeople" style="flex:1;padding:12px">Simpan & lanjut</button></div></div>';
   }
   function viewFixNames() {
     return '<div class="onb"><div class="logo" aria-hidden="true">M</div><div><h1>Isi 5 nama dulu</h1></div>' +
@@ -352,7 +373,7 @@
     document.querySelectorAll('details.card').forEach((d, i) => { open[i] = d.open; });
     const y = window.scrollY;
     let h;
-    if (!namesValid()) h = viewFixNames();
+    if (!namesValid()) h = state.me != null ? viewFixNames() : (ui.step === 'people' ? viewPeople() : viewWelcome());
     else if (state.me == null) h = viewOnboarding();
     else {
       h = '<main>' + (ui.tab === 'all' ? viewAll() : ui.tab === 'set' ? viewSet() : viewMe()) + '</main>' + tabbar();
@@ -437,11 +458,48 @@
 
   /* ---------- event ---------- */
   $app.addEventListener('input', (e) => {
-    if (e.target.dataset && e.target.dataset.field === 'nameDraft') { ui.nameDraft = e.target.value; ui.nameError = ''; }
+    const f = e.target.dataset && e.target.dataset.field;
+    if (f === 'nameDraft') { ui.nameDraft = e.target.value; ui.nameError = ''; }
+    else if (f && f.indexOf('pd:') === 0) { ui.peopleDraft[+f.slice(3)] = e.target.value; ui.nameError = ''; }
   });
   $app.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target.id === 'nameInput') { e.preventDefault(); submitName(); }
+    if (e.key !== 'Enter') return;
+    if (e.target.id === 'nameInput') { e.preventDefault(); if (!namesValid() && state.me == null) welcomeNext(); else submitName(); }
+    else if (e.target.dataset && e.target.dataset.field && e.target.dataset.field.indexOf('pd:') === 0) {
+      e.preventDefault();
+      const next = $app.querySelector('[data-field="pd:' + (Number(e.target.dataset.field.slice(3)) + 1) + '"]');
+      if (next) next.focus(); else savePeople();
+    }
   });
+  function welcomeNext() {
+    const name = ui.nameDraft.trim();
+    if (!name) { ui.nameError = 'Ketik namamu dulu.'; render(); return; }
+    ui.myName = name; ui.nameError = ''; ui.step = 'people';
+    // isi dari data yang sudah ada, pastikan namamu ikut tercantum
+    const draft = state.people.map((x) => String(x).trim());
+    if (!draft.some((x) => x.toLowerCase() === name.toLowerCase())) {
+      const slot = draft.findIndex((x) => !x);
+      draft[slot >= 0 ? slot : 0] = name;
+    }
+    ui.peopleDraft = draft;
+    render(); window.scrollTo(0, 0);
+  }
+  function savePeople() {
+    const list = ui.peopleDraft.map((x) => String(x).trim());
+    const lower = list.map((x) => x.toLowerCase());
+    let err = '';
+    if (list.some((x) => !x)) err = 'Isi kelima nama dulu.';
+    else if (new Set(lower).size !== 5) err = 'Ada nama yang sama. Setiap orang harus punya nama berbeda.';
+    else if (lower.indexOf(ui.myName.toLowerCase()) < 0) err = 'Namamu “' + ui.myName + '” belum ada di daftar. Masukkan namamu sebagai salah satu dari 5 nama.';
+    if (err) { ui.nameError = err; render(); return; }
+    state.people = list;
+    state.me = lower.indexOf(ui.myName.toLowerCase());
+    state.weeks = [newWeek()];
+    state.baseline = { prevOff: [null, null, null, null, null], prevMiddle: null };
+    state.startDate = S.snapToMonday(todayISO());
+    ui.nameDraft = ''; ui.nameError = ''; ui.tab = 'me'; ui.sel = 0; ui.selDay = null; ui.step = 'welcome';
+    save(); render(); window.scrollTo(0, 0);
+  }
   function submitName() {
     const v = ui.nameDraft.trim().toLowerCase();
     const i = names().findIndex((n) => n.toLowerCase() === v);
@@ -494,6 +552,9 @@
       case 'day': ui.selDay = i; render(); break;
       case 'chname': state.me = null; ui.nameDraft = ''; ui.nameError = ''; render(); window.scrollTo(0, 0); break;
       case 'pick': ui.nameDraft = names()[i]; submitName(); break;
+      case 'welcomenext': welcomeNext(); break;
+      case 'peopleback': ui.step = 'welcome'; ui.nameDraft = ui.myName; ui.nameError = ''; render(); break;
+      case 'savepeople': savePeople(); break;
       case 'submitname': submitName(); break;
       case 'addweek': {
         state.weeks.push(newWeek());
@@ -514,7 +575,7 @@
       case 'sharemy': if (isNative) shareText('Jadwal ' + names()[state.me], myText(i)); else copyText(myText(i)); break;
       case 'xlsx': exportXlsx(i); break;
       case 'reset':
-        if (window.confirm('Hapus semua data jadwal dan kembali ke awal?')) { state = defaultState(); ui.sel = currentWeekIndex(); ui.selDay = null; ui.tab = 'me'; save(); render(); window.scrollTo(0, 0); }
+        if (window.confirm('Hapus semua data jadwal dan kembali ke awal?')) { state = defaultState(); ui.sel = 0; ui.selDay = null; ui.tab = 'me'; ui.step = 'welcome'; ui.nameDraft = ''; ui.nameError = ''; ui.myName = ''; save(); render(); window.scrollTo(0, 0); }
         break;
       default: break;
     }

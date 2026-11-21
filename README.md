@@ -5,7 +5,7 @@ Web statis tanpa build dan tanpa dependensi: buka `index.html` di browser, atau 
 
 ## Cara pakai
 
-1. Saat pertama dibuka, aplikasi menanyakan namamu (ketik atau pilih dari daftar).
+1. Saat pertama dibuka, aplikasi menanyakan namamu, lalu kamu mengisi nama 5 orang yang masuk jadwal (tidak ada nama bawaan).
 2. Tab **Atur**: pilih siapa yang libur tiap hari Senin–Jumat, atau tekan **Isi libur otomatis**. Tambah request shift bila perlu.
 3. Tab **Jadwalku**: hanya jadwalmu selama seminggu (Pagi / Siang / Middle, Kasir / Piket, Libur) beserta jam kerjanya.
 4. Tab **Lengkap**: jadwal semua 5 orang dalam tabel berwarna, lalu **Ekspor ke WPS (.xlsx)**.
@@ -22,6 +22,10 @@ Data tersimpan di browser/aplikasi (localStorage). Nama bisa diubah di Atur → 
 - Senin–Jumat: Pagi (Kasir + Piket), Siang (Kasir + Piket), 1 orang libur.
 - Sabtu–Minggu: Pagi (Kasir + Piket), Middle, Siang (Kasir + Piket).
 - Middle Sabtu dan Minggu orang yang sama, dirotasi tiap minggu.
+- Sabtu–Minggu: pasangan tetap sama, shift bergantian (Sabtu Pagi → Minggu Siang, dan sebaliknya),
+  tugas juga bergantian (Sabtu kasir → Minggu piket, dan sebaliknya).
+- Konsekuensinya, orang yang libur Jumat tidak boleh libur Senin berikutnya
+  (Sabtu wajib kasir siang, tapi Minggu harus kasir pagi).
 - Sehari sebelum libur wajib Pagi (Kasir); sehari setelah libur wajib Siang (Kasir).
 - Yang kasir pagi hari Minggu = yang libur Senin minggu depan.
 - Yang dapat Middle: 2x Pagi, 2x Siang. Yang lain: 3x Pagi, 3x Siang.
