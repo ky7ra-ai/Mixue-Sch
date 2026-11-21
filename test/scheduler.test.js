@@ -160,3 +160,50 @@ test('tanggal: snap ke Senin dan Senin berikutnya', () => {
   assert.strictEqual(S.nextMonday('2026-11-23'), '2026-11-23');
   assert.strictEqual(S.addDays('2026-11-23', 7), '2026-11-30');
 });
+
+/* ---------- ekspor XLSX ---------- */
+const zlib = require('node:zlib');
+const X = require('../js/xlsx.js');
+
+function readZip(buf) {
+  // baca central directory, kembalikan {nama: {crc, size, data}}
+  const eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 5, 6]));
+  assert.ok(eocd >= 0, 'EOCD tidak ada');
+  const n = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  const out = {};
+  for (let i = 0; i < n; i++) {
+    assert.strictEqual(buf.readUInt32LE(p), 0x02014b50);
+    const crc = buf.readUInt32LE(p + 16), size = buf.readUInt32LE(p + 24);
+    const nl = buf.readUInt16LE(p + 28), el = buf.readUInt16LE(p + 30), cl = buf.readUInt16LE(p + 32);
+    const lo = buf.readUInt32LE(p + 42);
+    const name = buf.slice(p + 46, p + 46 + nl).toString('utf8');
+    const lnl = buf.readUInt16LE(lo + 26), lel = buf.readUInt16LE(lo + 28);
+    const data = buf.slice(lo + 30 + lnl + lel, lo + 30 + lnl + lel + size);
+    out[name] = { crc, size, data };
+    p += 46 + nl + el + cl;
+  }
+  return out;
+}
+
+test('ekspor xlsx: zip valid, CRC cocok, nama & warna sesuai', () => {
+  const r = S.solveWeek({ people: PEOPLE, off: PEOPLE, nextMondayOff: null, middleHistory: [], requests: [] });
+  const U = (v) => (v ? v.toUpperCase() : '');
+  const model = {
+    days: S.DAYS.map((n, d) => ({ name: n.toUpperCase(), date: S.addDays('2026-11-23', d) })),
+    pagiK: r.days.map((x) => U(x.PK)), pagiP: r.days.map((x) => U(x.PP)),
+    middle: r.days.map((x, d) => (d >= 5 ? U(x.M) : '')),
+    siangK: r.days.map((x) => U(x.SK)), siangP: r.days.map((x) => U(x.SP)),
+    off: r.days.map((x, d) => (d < 5 ? U(x.off) : '')),
+  };
+  const buf = Buffer.from(X.buildWeekWorkbook(model));
+  const files = readZip(buf);
+  ['[Content_Types].xml', '_rels/.rels', 'xl/workbook.xml', 'xl/styles.xml', 'xl/sharedStrings.xml', 'xl/worksheets/sheet1.xml']
+    .forEach((n) => assert.ok(files[n], 'hilang: ' + n));
+  Object.entries(files).forEach(([n, f]) => assert.strictEqual(zlib.crc32(f.data), f.crc, 'CRC salah: ' + n));
+  const sst = files['xl/sharedStrings.xml'].data.toString('utf8');
+  ['SHIFT', 'PAGI', 'MIDDLE', 'SIANG', 'OFF', 'KOLOM PUTIH JADWAL KASIR', 'KOLOM BIRU JADWAL PIKET', 'JAM KERJA', '08.00-17.00', '11.00-20.00', '13.00-22.00', 'CLOSING']
+    .forEach((t) => assert.ok(sst.includes('>' + t + '<'), 'teks hilang: ' + t));
+  const styles = files['xl/styles.xml'].data.toString('utf8');
+  ['FFFFE600', 'FF92D050', 'FF00B0F0', 'FFFF0000'].forEach((c) => assert.ok(styles.includes(c), 'warna hilang: ' + c));
+});

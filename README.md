@@ -5,14 +5,16 @@ Web statis tanpa build dan tanpa dependensi: buka `index.html` di browser, atau 
 
 ## Cara pakai
 
-1. Buka `index.html`.
-2. Pilih siapa yang libur di tiap hari Senin–Jumat, atau tekan **Isi libur otomatis**.
-3. Sistem menyusun Pagi/Siang/Middle, Kasir/Piket untuk 7 hari.
-4. Tambah **Request masuk shift** bila ada. Yang melanggar aturan ditolak beserta alasannya.
-5. Tekan **Tambah minggu** untuk minggu berikutnya (libur disarankan otomatis mengikuti rolling).
-6. Salin teks, unduh CSV, atau cetak.
+1. Saat pertama dibuka, aplikasi menanyakan namamu (ketik atau pilih dari daftar).
+2. Tab **Atur**: pilih siapa yang libur tiap hari Senin–Jumat, atau tekan **Isi libur otomatis**. Tambah request shift bila perlu.
+3. Tab **Jadwalku**: hanya jadwalmu selama seminggu (Pagi / Siang / Middle, Kasir / Piket, Libur) beserta jam kerjanya.
+4. Tab **Lengkap**: jadwal semua 5 orang dalam tabel berwarna, lalu **Ekspor ke WPS (.xlsx)**.
+5. Gunakan panah di atas untuk pindah minggu; **Tambah minggu** di tab Atur menyarankan libur minggu berikutnya (rolling).
 
-Data tersimpan di browser (localStorage). Nama bisa diubah di bagian Pengaturan.
+File ekspor `.xlsx` bisa dibuka di WPS Office, Excel, atau LibreOffice dengan tata letak SHIFT / PAGI / MIDDLE / SIANG / OFF,
+keterangan kolom putih (kasir) dan biru (piket), serta tabel JAM KERJA. Di APK, tombol Ekspor membuka menu bagikan Android: pilih WPS Office.
+
+Data tersimpan di browser/aplikasi (localStorage). Nama bisa diubah di Atur → Pengaturan.
 
 ## Aturan
 
@@ -45,6 +47,7 @@ index.html          halaman utama
 css/style.css       tampilan
 js/scheduler.js     mesin penjadwalan (jalan di browser dan Node)
 js/app.js           antarmuka
+js/xlsx.js          pembuat file .xlsx untuk ekspor WPS
 capacitor.config.json, package.json, scripts/   pembungkus APK
 signing/            keystore penandatangan APK
 .github/workflows/  build & release APK

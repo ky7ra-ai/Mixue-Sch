@@ -1,32 +1,33 @@
 (function () {
   'use strict';
   const S = window.Scheduler;
+  const X = window.XlsxLite;
   const KEY = 'mixue-sch-v1';
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  const MONTHS_FULL = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
   const SHIFTS = ['Pagi', 'Siang', 'Middle'];
+  const TIMES = { Pagi: '08.00–17.00', Middle: '11.00–20.00', Siang: '13.00–22.00' };
+  const DOT = { pagi: '#f4b53d', siang: '#5b9cf0', middle: '#8d6cf0', libur: '#cdc3be' };
+  const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   const $app = document.getElementById('app');
   const $toast = document.getElementById('toast');
 
   /* ---------- mode aplikasi Android (Capacitor) ---------- */
   const isNative = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
   if (isNative) document.documentElement.classList.add('native');
-  async function nativeShare(title, text) {
-    try {
-      const sharePlugin = window.Capacitor.Plugins && window.Capacitor.Plugins.Share;
-      if (!sharePlugin) throw new Error('no share');
-      await sharePlugin.share({ title, text, dialogTitle: 'Bagikan jadwal' });
-    } catch (e) {
-      if (e && /cancel/i.test(String(e.message || e))) return;
-      copyText(text);
-    }
-  }
+  const plugins = () => (window.Capacitor && window.Capacitor.Plugins) || {};
 
   /* ---------- util ---------- */
   const pad = (n) => String(n).padStart(2, '0');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   function todayISO() { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
   function dmy(iso) { const d = S.parseDate(iso); return d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear(); }
-  function dm(iso) { const d = S.parseDate(iso); return pad(d.getUTCDate()) + '/' + pad(d.getUTCMonth() + 1); }
+  function dm(iso) { const d = S.parseDate(iso); return d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()]; }
+  function sheetDate(iso) { const d = S.parseDate(iso); return d.getUTCDate() + '-' + MONTHS[d.getUTCMonth()] + '-' + String(d.getUTCFullYear()).slice(2); }
+  function longDate(iso) {
+    const d = S.parseDate(iso);
+    return S.DAYS[(d.getUTCDay() + 6) % 7] + ', ' + d.getUTCDate() + ' ' + MONTHS_FULL[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+  }
   function range(start) {
     const a = S.parseDate(start), b = S.parseDate(S.addDays(start, 6));
     if (a.getUTCMonth() === b.getUTCMonth()) return a.getUTCDate() + '–' + b.getUTCDate() + ' ' + MONTHS[b.getUTCMonth()] + ' ' + b.getUTCFullYear();
@@ -38,6 +39,19 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => $toast.classList.remove('show'), 4200);
   }
 
+  /* ---------- ikon (garis minimalis) ---------- */
+  const ICONS = {
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    sunset: '<path d="M17 18a5 5 0 0 0-10 0"/><path d="M12 9v3M4.2 10.2l1.5 1.5M1 18h2M21 18h2M18.3 11.7l1.5-1.5M23 22H1M16 5l-4 4-4-4"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+    grid: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M3 15h18M9 3v18"/>',
+    sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  };
+  const svg = (n, extra) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (extra || '') + '>' + ICONS[n] + '</svg>';
+  const ICON_OF = { pagi: 'sun', siang: 'sunset', middle: 'clock', libur: 'home' };
+
   /* ---------- state ---------- */
   function newWeek() { return { off: [null, null, null, null, null], middle: 'auto', requests: [] }; }
   function defaultState() {
@@ -46,22 +60,33 @@
       people: ['Ahmad', 'Ferri', 'Budi', 'Tamam', 'Ainun'],
       settings: { minGap: S.DEFAULT_SETTINGS.minGap, maxGap: S.DEFAULT_SETTINGS.maxGap },
       baseline: { prevOff: [null, null, null, null, null], prevMiddle: null },
-      startDate: S.nextMonday(todayISO()),
+      startDate: S.snapToMonday(todayISO()),
       weeks: [newWeek()],
+      me: null,
     };
   }
   function load() {
     try {
       const s = JSON.parse(localStorage.getItem(KEY) || 'null');
-      if (s && s.version === 1 && Array.isArray(s.people) && s.people.length === 5 && Array.isArray(s.weeks) && s.weeks.length) return s;
+      if (s && s.version === 1 && Array.isArray(s.people) && s.people.length === 5 && Array.isArray(s.weeks) && s.weeks.length) {
+        if (s.me === undefined || s.me === null || !(s.me >= 0 && s.me < 5)) s.me = null;
+        return s;
+      }
     } catch (e) { /* abaikan */ }
     return defaultState();
   }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* abaikan */ } }
   let state = load();
 
+  const ui = { tab: 'me', sel: 0, selDay: null, nameDraft: '', nameError: '' };
+  function currentWeekIndex() {
+    const diff = Math.floor((S.parseDate(todayISO()) - S.parseDate(state.startDate)) / 864e5 / 7);
+    return Math.max(0, Math.min(state.weeks.length - 1, diff));
+  }
+  ui.sel = currentWeekIndex();
+
   const names = () => state.people.map((n) => String(n).trim());
-  function namesValid() { const n = names(); return n.every(Boolean) && new Set(n).size === 5; }
+  function namesValid() { const n = names(); return n.every(Boolean) && new Set(n.map((x) => x.toLowerCase())).size === 5; }
 
   function engineState() {
     const n = names();
@@ -77,6 +102,12 @@
         requests: w.requests.map((r, i) => ({ person: n[r.p], day: r.day, shift: r.shift, i })),
       })),
     };
+  }
+  let cacheKey = '', cacheVal = null;
+  function computed() {
+    const k = JSON.stringify([state.people, state.settings, state.baseline, state.weeks]);
+    if (k !== cacheKey) { cacheVal = S.computeAll(engineState()); cacheKey = k; }
+    return cacheVal;
   }
 
   function suggestFor(w) {
@@ -99,7 +130,6 @@
       nextMondayOff: next && next.off[0] ? next.off[0] : null,
     });
   }
-
   function applySuggestion(w) {
     const sg = suggestFor(w);
     if (!sg.off) { flash(sg.error || 'Tidak bisa menyarankan libur.'); return false; }
@@ -109,185 +139,234 @@
     return true;
   }
 
-  /* ---------- render ---------- */
+  /* ---------- data tampilan ---------- */
+  function info(code) {
+    const sh = S.shiftOf(code), role = S.roleOf(code);
+    const key = sh === 'Pagi' ? 'pagi' : sh === 'Siang' ? 'siang' : sh === 'Middle' ? 'middle' : 'libur';
+    return { sh, role, key, time: TIMES[sh] || '' };
+  }
+  function weekStart(i) { return S.addDays(state.startDate, i * 7); }
+  function sheetModel(i) {
+    const e = computed()[i];
+    if (!e || !e.result) return null;
+    const res = e.result, start = weekStart(i);
+    const U = (v) => (v ? String(v).toUpperCase() : '');
+    return {
+      days: S.DAYS.map((n, d) => ({ name: n.toUpperCase(), date: sheetDate(S.addDays(start, d)) })),
+      pagiK: res.days.map((x) => U(x.PK)),
+      pagiP: res.days.map((x) => U(x.PP)),
+      middle: res.days.map((x, d) => (d >= 5 ? U(x.M) : '')),
+      siangK: res.days.map((x) => U(x.SK)),
+      siangP: res.days.map((x) => U(x.SP)),
+      off: res.days.map((x, d) => (d < 5 ? U(x.off) : '')),
+    };
+  }
+
+  /* ---------- komponen ---------- */
   function optionTags(selected, blank) {
     const n = names();
     let h = blank == null ? '' : '<option value="">' + esc(blank) + '</option>';
     n.forEach((name, i) => { h += '<option value="' + i + '"' + (selected === i ? ' selected' : '') + '>' + esc(name || ('Orang ' + (i + 1))) + '</option>'; });
     return h;
   }
-
-  function cellHtml(code) {
-    const shift = S.shiftOf(code), role = S.roleOf(code);
-    const cls = shift === 'Pagi' ? 'c-P' : shift === 'Siang' ? 'c-S' : shift === 'Middle' ? 'c-M' : 'c-L';
-    return '<td class="cell ' + cls + '">' + shift + (role ? '<small>' + role + '</small>' : '') + '</td>';
+  function weekNav() {
+    const w = ui.sel;
+    return '<div class="weeknav"><button class="iconbtn" data-action="wk:-1" aria-label="Minggu sebelumnya"' + (w === 0 ? ' disabled' : '') + '>‹</button>' +
+      '<div class="lbl">Minggu ' + (w + 1) + '<span>' + esc(range(weekStart(w))) + '</span></div>' +
+      '<button class="iconbtn" data-action="wk:1" aria-label="Minggu berikutnya"' + (w >= state.weeks.length - 1 ? ' disabled' : '') + '>›</button></div>';
   }
-
-  function renderWeek(i, entry) {
-    const w = state.weeks[i];
-    const start = S.addDays(state.startDate, i * 7);
-    const res = entry.result;
-    const last = i === state.weeks.length - 1;
-    let h = '<section class="card" id="week-' + i + '">';
-    h += '<div class="week-head"><h2>Minggu ' + (i + 1) + ' · ' + esc(range(start)) + '</h2>';
-    if (res) h += '<span class="badge">Middle Sab–Min: ' + esc(res.middle) + '</span>';
-    h += '</div>';
-
-    // input libur
-    h += '<div class="no-print"><div class="tablewrap"><table aria-label="Input hari libur"><thead><tr><th></th>';
-    for (let d = 0; d < 7; d++) h += '<th>' + S.DAYS[d] + '<br><span class="small">' + dm(S.addDays(start, d)) + '</span></th>';
-    h += '</tr></thead><tbody><tr><td class="rowhead">Libur</td>';
-    for (let d = 0; d < 5; d++) {
-      h += '<td class="sel"><select data-field="off:' + i + ':' + d + '" aria-label="Libur hari ' + S.DAYS[d] + '">' + optionTags(w.off[d], '— pilih —') + '</select></td>';
-    }
-    h += '<td class="weekend">wajib masuk</td><td class="weekend">wajib masuk</td></tr></tbody></table></div>';
-
-    h += '<div class="row" style="margin-top:10px">';
-    h += '<label class="field" style="grid-auto-flow:column;align-items:center;gap:8px">Middle<select data-field="mid:' + i + '" aria-label="Middle minggu ini">' +
-      '<option value="auto"' + (w.middle === 'auto' ? ' selected' : '') + '>Otomatis (rotasi)</option>' + optionTags(w.middle === 'auto' ? null : w.middle) + '</select></label>';
-    h += '<button data-action="auto:' + i + '" class="primary">✨ Isi libur otomatis</button>';
-    h += '<button data-action="clear:' + i + '" class="ghost">Kosongkan</button>';
-    if (last && state.weeks.length > 1) h += '<button data-action="remove:' + i + '" class="danger ghost">Hapus minggu ini</button>';
-    h += '</div>';
-
-    // request
-    h += '<h3>Request masuk shift</h3>';
-    const rejected = {};
-    if (res) res.rejected.forEach((r) => { rejected[r.request.i] = r.reason; });
-    w.requests.forEach((r, ri) => {
-      h += '<div class="reqrow"><select data-field="reqP:' + i + ':' + ri + '" aria-label="Nama">' + optionTags(r.p) + '</select>';
-      h += '<select data-field="reqD:' + i + ':' + ri + '" aria-label="Hari">';
-      S.DAYS.forEach((dn, d) => { h += '<option value="' + d + '"' + (r.day === d ? ' selected' : '') + '>' + dn + '</option>'; });
-      h += '</select><select data-field="reqS:' + i + ':' + ri + '" aria-label="Shift">';
-      SHIFTS.forEach((s) => { h += '<option' + (r.shift === s ? ' selected' : '') + '>' + s + '</option>'; });
-      h += '</select><button class="ghost" data-action="delreq:' + i + ':' + ri + '" aria-label="Hapus request">×</button>';
-      if (res) {
-        if (rejected[ri] !== undefined) h += '<span class="status no">✗ ' + esc(rejected[ri]) + '</span>';
-        else h += '<span class="status ok">✓ dipenuhi</span>';
-      }
-      h += '</div>';
-    });
-    h += '<button data-action="addreq:' + i + '">+ Tambah request</button>';
-    h += '</div>'; // no-print
-
-    // pesan
+  function tabbar() {
+    const t = (id, label, icon) => '<button data-action="tab:' + id + '" class="' + (ui.tab === id ? 'on' : '') + '" aria-label="' + label + '">' + svg(icon) + label + '</button>';
+    return '<nav class="tabbar"><div class="in">' + t('me', 'Jadwalku', 'user') + t('all', 'Lengkap', 'grid') + t('set', 'Atur', 'sliders') + '</div></nav>';
+  }
+  function msgBlock(entry) {
     const msgs = [];
     entry.errors.forEach((m) => msgs.push('<div class="msg err">' + esc(m) + '</div>'));
-    entry.warnings.forEach((m) => msgs.push('<div class="msg warn">⚠ ' + esc(m) + '</div>'));
+    entry.warnings.forEach((m) => msgs.push('<div class="msg warn">' + esc(m) + '</div>'));
     entry.notes.forEach((m) => msgs.push('<div class="msg info">' + esc(m) + '</div>'));
-    if (msgs.length) h += '<div class="msgs no-print">' + msgs.join('') + '</div>';
+    return msgs.length ? '<div class="msgs">' + msgs.join('') + '</div>' : '';
+  }
+  function emptyState(entry) {
+    return '<div class="card empty"><b>Jadwal minggu ini belum dibuat</b>Pilih hari libur kelima orang di tab Atur, atau biarkan sistem mengisinya otomatis.' +
+      '<br><button class="primary" data-action="gotoset">Buka Atur</button></div>' + (entry && entry.errors.length && entry.errors.some((e) => !/^Pilih 5 orang/.test(e)) ? msgBlock({ errors: entry.errors.filter((e) => !/^Pilih 5 orang/.test(e)), warnings: [], notes: [] }) : '');
+  }
 
-    if (res) {
-      // per posisi
-      h += '<h3>Jadwal per posisi</h3><div class="tablewrap"><table><thead><tr><th></th>';
-      for (let d = 0; d < 7; d++) h += '<th>' + S.DAYS_SHORT[d] + '<br><span class="small">' + dm(S.addDays(start, d)) + '</span></th>';
-      h += '</tr></thead><tbody>';
-      const rows = [['PK', 'Pagi · Kasir', 'c-P'], ['PP', 'Pagi · Piket', 'c-P'], ['M', 'Middle', 'c-M'], ['SK', 'Siang · Kasir', 'c-S'], ['SP', 'Siang · Piket', 'c-S'], ['off', 'Libur', 'c-L']];
-      rows.forEach(([key, label, cls]) => {
-        h += '<tr><td class="slot-name">' + label + '</td>';
-        for (let d = 0; d < 7; d++) {
-          const v = res.days[d][key];
-          h += v ? '<td class="' + cls + '">' + esc(v) + '</td>' : '<td class="c-none">—</td>';
-        }
-        h += '</tr>';
-      });
-      h += '</tbody></table></div>';
+  /* ---------- tab 1: Jadwalku ---------- */
+  function viewMe() {
+    const all = computed(), w = ui.sel, entry = all[w], res = entry && entry.result;
+    const start = weekStart(w), me = names()[state.me];
+    let h = '<div class="head"><div><h1>Halo, ' + esc(me) + '</h1><div class="date">' + esc(longDate(todayISO())) + '</div></div>' +
+      '<button class="avatar" data-action="chname" aria-label="Ganti nama">' + esc(me.charAt(0).toUpperCase()) + '</button></div>';
+    h += weekNav();
+    if (!res) return h + emptyState(entry);
 
-      // per orang
-      h += '<h3>Jadwal per orang</h3><div class="tablewrap"><table><thead><tr><th></th>';
-      for (let d = 0; d < 7; d++) h += '<th>' + S.DAYS_SHORT[d] + '</th>';
-      h += '</tr></thead><tbody>';
-      names().forEach((n) => {
-        h += '<tr><td class="rowhead">' + esc(n) + '</td>';
-        res.assign[n].forEach((c) => { h += cellHtml(c); });
-        h += '</tr>';
-      });
-      h += '</tbody></table></div>';
+    const codes = res.assign[me];
+    const diff = Math.round((S.parseDate(todayISO()) - S.parseDate(start)) / 864e5);
+    const todayIdx = diff >= 0 && diff <= 6 ? diff : -1;
+    const dsel = ui.selDay != null ? ui.selDay : (todayIdx >= 0 ? todayIdx : 0);
 
-      // rekap
-      h += '<div class="stats"><h3>Rekap jatah minggu ini</h3><div class="tablewrap"><table><thead><tr><th></th><th>Pagi</th><th>Siang</th><th>Middle</th><th>Kasir</th><th>Piket</th></tr></thead><tbody>';
-      names().forEach((n) => {
-        const s = res.stats[n];
-        h += '<tr><td class="rowhead">' + esc(n) + '</td><td>' + s.Pagi + '</td><td>' + s.Siang + '</td><td>' + s.Middle + '</td><td>' + s.Kasir + '</td><td>' + s.Piket + '</td></tr>';
-      });
-      h += '</tbody></table></div></div>';
-
-      if (entry.nextMondayOff) {
-        h += '<p class="muted small">Minggu kasir pagi: <b>' + esc(entry.nextMondayOff) + '</b> (libur Senin minggu depan).</p>';
-      } else {
-        h += '<p class="muted small no-print">Minggu depan belum dibuat, jadi kasir pagi hari Minggu masih bebas dan akan menyesuaikan siapa yang libur Senin depan.</p>';
-      }
-      h += '<div class="row no-print" style="margin-top:8px"><button data-action="copy:' + i + '">📋 Salin teks</button>' +
-        (isNative
-          ? '<button class="primary" data-action="share:' + i + '">📤 Bagikan (WhatsApp, dll)</button>'
-          : '<button data-action="csv:' + i + '">⬇ Unduh CSV</button><button data-action="print">🖨 Cetak</button>') + '</div>';
+    h += '<div class="strip">';
+    for (let d = 0; d < 7; d++) {
+      const inf = info(codes[d]);
+      h += '<button data-action="day:' + d + '" class="' + (d === todayIdx ? 'today ' : '') + (d === dsel ? 'sel' : '') + '" aria-label="' + S.DAYS[d] + '">' +
+        S.DAYS_SHORT[d] + '<span class="num">' + S.parseDate(S.addDays(start, d)).getUTCDate() + '</span><span class="dot" style="background:' + DOT[inf.key] + '"></span></button>';
     }
-    h += '</section>';
+    h += '</div>';
+
+    const hi = info(codes[dsel]);
+    h += '<div class="hero"><div><div class="k">' + (dsel === todayIdx ? 'Hari ini · ' : '') + esc(S.DAYS[dsel]) + ', ' + esc(dm(S.addDays(start, dsel))) + '</div>' +
+      '<div class="big">' + esc(hi.key === 'libur' ? 'Libur' : hi.sh) + '</div>' +
+      '<div class="sub">' + esc(hi.key === 'libur' ? 'Selamat istirahat' : (hi.role ? hi.role + ' · ' : '') + hi.time) + '</div></div>' +
+      '<div style="color:var(--accent)">' + svg(ICON_OF[hi.key], ' width="78" height="78" stroke-width="1.2"') + '</div></div>';
+
+    const st = res.stats[me];
+    h += '<div class="sumrow"><span class="pill pagi">' + st.Pagi + ' Pagi</span><span class="pill siang">' + st.Siang + ' Siang</span>' +
+      (st.Middle ? '<span class="pill middle">' + st.Middle + ' Middle</span>' : '') + '<span class="pill libur">' + st.Libur + ' Libur</span></div>';
+
+    h += '<div class="list">';
+    for (let d = 0; d < 7; d++) {
+      const inf = info(codes[d]);
+      h += '<button class="item' + (d === dsel ? ' sel' : '') + '" data-action="day:' + d + '"><span class="chip ' + inf.key + '">' + svg(ICON_OF[inf.key]) + '</span>' +
+        '<span class="t"><b>' + esc(S.DAYS[d]) + ', ' + esc(dm(S.addDays(start, d))) + '</b><span>' +
+        esc(inf.key === 'libur' ? 'Libur' : inf.sh + (inf.role ? ' · ' + inf.role : '')) + '</span></span>' +
+        '<span class="tm">' + esc(inf.time) + '</span></button>';
+    }
+    h += '</div>';
+    h += '<div class="row" style="margin-top:14px"><button data-action="sharemy:' + w + '">' + (isNative ? 'Bagikan jadwalku' : 'Salin jadwalku') + '</button></div>';
     return h;
   }
 
-  function renderSettings() {
-    const n = state.people;
-    let h = '<details class="card no-print"><summary>Pengaturan: nama, aturan jarak libur, minggu sebelumnya</summary>';
-    h += '<h3>Nama 5 orang</h3><div class="grid5">';
-    n.forEach((name, i) => { h += '<label class="field">Orang ' + (i + 1) + '<input type="text" data-field="name:' + i + '" value="' + esc(name) + '" maxlength="30"></label>'; });
+  /* ---------- tab 2: Jadwal lengkap ---------- */
+  function sheetTable(m) {
+    const row = (cells, cls) => cells.map((v) => '<td class="' + cls + '">' + esc(v) + '</td>').join('');
+    const blank = ['', '', '', '', '', '', ''];
+    let h = '<div class="sheetwrap"><table class="sheet"><thead><tr><th>SHIFT</th>' +
+      m.days.map((d) => '<th>' + esc(d.name) + '<br>' + esc(d.date.replace(/-\d\d$/, '')) + '</th>').join('') + '</tr></thead><tbody>';
+    h += '<tr><td class="lab" rowspan="3">PAGI</td>' + row(m.pagiK, 'kasir') + '</tr><tr>' + row(m.pagiP, 'piket') + '</tr><tr>' + row(blank, 'ex') + '</tr>';
+    h += '<tr><td class="midlab">MIDDLE</td>' + row(m.middle, 'mid') + '</tr>';
+    h += '<tr><td class="lab" rowspan="4">SIANG</td>' + row(m.siangK, 'kasir') + '</tr><tr>' + row(m.siangP, 'piket') + '</tr><tr>' + row(blank, 'ex') + '</tr><tr>' + row(blank, 'ex') + '</tr>';
+    h += '<tr><td class="offlab" rowspan="2">OFF</td>' + row(m.off, 'off') + '</tr><tr>' + row(blank, 'off') + '</tr>';
+    h += '<tr><td colspan="8" class="legk">KOLOM PUTIH JADWAL KASIR</td></tr><tr><td colspan="8" class="legp">KOLOM BIRU JADWAL PIKET</td></tr>';
+    h += '</tbody></table></div>';
+    h += '<table class="jam"><tr><th colspan="2">JAM KERJA</th></tr>' +
+      X.JAM_KERJA.map((j) => '<tr><td>' + j[0] + '</td><td>' + j[1] + '</td></tr>').join('') + '</table>';
+    return h;
+  }
+  function viewAll() {
+    const w = ui.sel, entry = computed()[w], m = sheetModel(w);
+    let h = '<div class="head"><div><h1>Jadwal Lengkap</h1><div class="date">Semua 5 orang · ' + esc(range(weekStart(w))) + '</div></div></div>';
+    h += weekNav();
+    if (!m) return h + emptyState(entry);
+    h += '<div class="card" style="padding:10px">' + sheetTable(m) + '</div>';
+    h += '<div class="row"><button class="primary" data-action="xlsx:' + w + '">Ekspor ke WPS (.xlsx)</button>' +
+      '<button data-action="' + (isNative ? 'share' : 'copy') + ':' + w + '">' + (isNative ? 'Bagikan teks' : 'Salin teks') + '</button></div>';
+    if (isNative) h += '<p class="muted small">Setelah menekan Ekspor, pilih WPS Office di daftar aplikasi untuk membuka file.</p>';
+    if (entry.warnings.length || entry.notes.length) h += msgBlock({ errors: [], warnings: entry.warnings, notes: entry.notes });
+    return h;
+  }
+
+  /* ---------- tab 3: Atur ---------- */
+  function nameInputs() {
+    let h = '<div class="grid2">';
+    state.people.forEach((name, i) => { h += '<label class="field">Orang ' + (i + 1) + '<input type="text" data-field="name:' + i + '" value="' + esc(name) + '" maxlength="30"></label>'; });
+    return h + '</div>';
+  }
+  function viewSet() {
+    const w = ui.sel, wk = state.weeks[w], entry = computed()[w], start = weekStart(w);
+    let h = '<div class="head"><div><h1>Atur Jadwal</h1><div class="date">Libur, request, dan pengaturan</div></div></div>';
+    h += weekNav();
+
+    h += '<div class="card"><h2>Hari libur</h2><p class="muted small" style="margin:2px 0 12px">Pilih siapa yang libur tiap hari. Sabtu & Minggu semua masuk.</p><div class="offlist">';
+    for (let d = 0; d < 5; d++) {
+      h += '<label><span>' + S.DAYS[d] + '<small>' + esc(dm(S.addDays(start, d))) + '</small></span><select data-field="off:' + w + ':' + d + '" aria-label="Libur ' + S.DAYS[d] + '">' + optionTags(wk.off[d], '— pilih —') + '</select></label>';
+    }
+    h += '</div><div class="row" style="margin-top:14px"><button class="accent" data-action="auto:' + w + '">Isi libur otomatis</button><button class="ghost" data-action="clear:' + w + '">Kosongkan</button></div>';
+    h += '<h3>Middle Sabtu–Minggu</h3><select data-field="mid:' + w + '" aria-label="Middle minggu ini"><option value="auto"' + (wk.middle === 'auto' ? ' selected' : '') + '>Otomatis (dirotasi)</option>' + optionTags(wk.middle === 'auto' ? null : wk.middle) + '</select>';
     h += '</div>';
-    h += '<h3>Tanggal minggu pertama</h3><label class="field" style="max-width:220px">Mulai (otomatis dibulatkan ke hari Senin)' +
-      '<input type="date" data-field="start" value="' + esc(state.startDate) + '"></label>';
-    h += '<h3>Jarak antar libur (hari)</h3><div class="row"><label class="field">Minimal (terlalu dekat)<input type="number" min="1" max="14" data-field="gap:minGap" value="' + state.settings.minGap + '"></label>' +
+    h += msgBlock(entry);
+
+    // request
+    const rejected = {};
+    if (entry.result) entry.result.rejected.forEach((r) => { rejected[r.request.i] = r.reason; });
+    h += '<div class="card"><h2>Request masuk shift</h2><p class="muted small" style="margin:2px 0 12px">Dipenuhi selama tidak melanggar aturan.</p>';
+    wk.requests.forEach((r, ri) => {
+      h += '<div class="req"><select data-field="reqP:' + w + ':' + ri + '" aria-label="Nama">' + optionTags(r.p) + '</select><select data-field="reqD:' + w + ':' + ri + '" aria-label="Hari">';
+      S.DAYS.forEach((dn, d) => { h += '<option value="' + d + '"' + (r.day === d ? ' selected' : '') + '>' + dn + '</option>'; });
+      h += '</select><select data-field="reqS:' + w + ':' + ri + '" aria-label="Shift">';
+      SHIFTS.forEach((s) => { h += '<option' + (r.shift === s ? ' selected' : '') + '>' + s + '</option>'; });
+      h += '</select><button class="ghost iconbtn" data-action="delreq:' + w + ':' + ri + '" aria-label="Hapus request">×</button></div>';
+      if (entry.result) h += rejected[ri] !== undefined ? '<div class="reqs no">Tidak bisa: ' + esc(rejected[ri]) + '</div>' : '<div class="reqs ok">Dipenuhi</div>';
+      else h += '<div style="height:8px"></div>';
+    });
+    h += '<button data-action="addreq:' + w + '">+ Tambah request</button></div>';
+
+    // minggu
+    h += '<div class="row" style="margin-bottom:14px"><button class="primary" data-action="addweek">+ Tambah minggu berikutnya</button>' +
+      (w === state.weeks.length - 1 && state.weeks.length > 1 ? '<button class="ghost danger" data-action="remove:' + w + '">Hapus minggu ini</button>' : '') + '</div>';
+
+    // pengaturan
+    h += '<details class="card"><summary>Pengaturan</summary>';
+    h += '<h3 style="margin-top:0">Aku adalah</h3><select data-field="me">' + optionTags(state.me) + '</select>';
+    h += '<h3>Nama 5 orang</h3>' + nameInputs();
+    h += '<h3>Tanggal minggu pertama</h3><label class="field" style="max-width:240px">Dibulatkan ke hari Senin<input type="date" data-field="start" value="' + esc(state.startDate) + '"></label>';
+    h += '<h3>Jarak antar libur (hari)</h3><div class="grid2"><label class="field">Minimal (terlalu dekat)<input type="number" min="1" max="14" data-field="gap:minGap" value="' + state.settings.minGap + '"></label>' +
       '<label class="field">Maksimal (terlalu jauh)<input type="number" min="1" max="14" data-field="gap:maxGap" value="' + state.settings.maxGap + '"></label></div>';
-    h += '<p class="muted small">Bawaan 4–9 hari: Jumat → Senin (3 hari) terlalu dekat; Senin → Kamis/Jumat (10–11 hari) terlalu jauh.</p>';
-    h += '<h3>Minggu sebelumnya (opsional)</h3><p class="muted small">Isi bila jadwal sudah berjalan, supaya jarak libur dan rotasi Middle minggu pertama ikut diperhitungkan.</p>';
-    h += '<div class="grid5">';
+    h += '<p class="muted small">Bawaan 4–9 hari: Jumat → Senin terlalu dekat, Senin → Kamis/Jumat terlalu jauh.</p>';
+    h += '<h3>Minggu sebelumnya (opsional)</h3><p class="muted small" style="margin-top:0">Isi bila jadwal sudah berjalan, supaya jarak libur dan rotasi Middle ikut diperhitungkan.</p><div class="grid2">';
     for (let d = 0; d < 5; d++) h += '<label class="field">Libur ' + S.DAYS[d] + '<select data-field="baseOff:' + d + '">' + optionTags(state.baseline.prevOff[d], '—') + '</select></label>';
     h += '<label class="field">Middle minggu lalu<select data-field="baseMid">' + optionTags(state.baseline.prevMiddle, '—') + '</select></label></div>';
-    h += '<div class="row" style="margin-top:14px"><button class="danger" data-action="reset">Reset semua data</button></div>';
-    h += '</details>';
+    h += '<div class="row" style="margin-top:16px"><button class="danger" data-action="reset">Reset semua data</button></div></details>';
+
+    h += '<details class="card"><summary>Aturan yang dipakai</summary><ul class="rules">' +
+      '<li>Libur 1x seminggu, hanya Senin–Jumat. Sabtu & Minggu dilarang libur.</li>' +
+      '<li>Senin–Jumat: Pagi (Kasir + Piket), Siang (Kasir + Piket), 1 orang libur.</li>' +
+      '<li>Sabtu–Minggu: Pagi (Kasir + Piket), Middle, Siang (Kasir + Piket).</li>' +
+      '<li>Middle Sabtu & Minggu orang yang sama, dirotasi tiap minggu.</li>' +
+      '<li>Sehari sebelum libur wajib Pagi (Kasir); sehari setelah libur wajib Siang (Kasir).</li>' +
+      '<li>Yang kasir pagi hari Minggu = yang libur Senin berikutnya.</li>' +
+      '<li>Yang dapat Middle 2x Pagi + 2x Siang; lainnya 3x Pagi + 3x Siang.</li>' +
+      '<li>Jarak libur antar minggu tidak terlalu jauh / dekat.</li></ul></details>';
     return h;
   }
 
-  function renderRules() {
-    return '<details class="card no-print"><summary>Aturan yang dipakai sistem</summary><ul class="rules">' +
-      '<li>Tiap orang libur 1x seminggu, hanya Senin–Jumat (Sabtu & Minggu dilarang libur). Tiap hari kerja tepat 1 orang libur.</li>' +
-      '<li>Senin–Jumat: Pagi (Kasir + Piket) dan Siang (Kasir + Piket). Sabtu–Minggu: Pagi (Kasir + Piket), Middle, Siang (Kasir + Piket).</li>' +
-      '<li>Middle Sabtu & Minggu orang yang sama dan dirotasi tiap minggu.</li>' +
-      '<li>Sehari sebelum libur wajib Pagi (Kasir), sehari setelah libur wajib Siang (Kasir).</li>' +
-      '<li>Rolling antar minggu: yang kasir pagi hari Minggu = yang libur Senin berikutnya.</li>' +
-      '<li>Jatah per minggu: yang dapat Middle 2x Pagi + 2x Siang, lainnya 3x Pagi + 3x Siang.</li>' +
-      '<li>Jarak libur minggu ini dan minggu depan tidak boleh terlalu jauh atau terlalu dekat.</li>' +
-      '<li>Request shift dipenuhi selama tidak melanggar aturan di atas; yang tidak bisa akan diberi alasan.</li>' +
-      '</ul></details>';
+  /* ---------- tanya nama & perbaiki nama ---------- */
+  function viewOnboarding() {
+    const n = names();
+    let h = '<div class="onb"><div class="logo" aria-hidden="true">M</div><div><h1>Halo! Siapa namamu?</h1>' +
+      '<p class="muted" style="margin:6px 0 0">Ketik namamu, lalu jadwalmu minggu ini langsung tampil.</p></div>' +
+      '<input type="text" id="nameInput" data-field="nameDraft" placeholder="Contoh: ' + esc(n[1] || n[0]) + '" autocomplete="off" autocapitalize="words" value="' + esc(ui.nameDraft) + '">';
+    if (ui.nameError) h += '<div class="msg err">' + esc(ui.nameError) + '</div>';
+    h += '<div class="chips">' + n.map((x, i) => '<button data-action="pick:' + i + '">' + esc(x) + '</button>').join('') + '</div>' +
+      '<button class="primary" data-action="submitname" style="padding:12px">Lanjut</button>' +
+      '<details class="card" style="margin:6px 0 0"><summary>Namamu tidak ada? Ubah daftar nama</summary>' + nameInputs() + '</details></div>';
+    return h;
+  }
+  function viewFixNames() {
+    return '<div class="onb"><div class="logo" aria-hidden="true">M</div><div><h1>Isi 5 nama dulu</h1></div>' +
+      '<div class="msg err">Kelima nama harus terisi dan tidak boleh sama.</div>' + nameInputs() + '</div>';
   }
 
+  /* ---------- render ---------- */
   function render() {
     const open = {};
     document.querySelectorAll('details.card').forEach((d, i) => { open[i] = d.open; });
-    let h = '<div class="topbar"><div class="brand"><div class="logo" aria-hidden="true">M</div><div><h1>Mixue Sch</h1>' +
-      '<div class="sub">Penjadwal shift otomatis · 5 orang · Pagi, Siang, Middle</div></div></div>' +
-      '<div class="row no-print"><button class="primary" data-action="addweek">+ Tambah minggu</button>' +
-      (isNative ? '' : '<button data-action="print">🖨 Cetak</button>') + '</div></div>';
-    h += '<p class="muted no-print">Pilih siapa yang libur di tiap hari (Senin–Jumat), sistem menyusun sisanya otomatis. Atau tekan “Isi libur otomatis”.</p>';
-    if (!namesValid()) {
-      h += '<div class="msg err">Nama kelima orang harus terisi dan tidak boleh sama. Perbaiki di bagian Pengaturan.</div>';
-      h += renderSettings();
-    } else {
-      const all = S.computeAll(engineState());
-      h += renderSettings() + renderRules();
-      all.forEach((entry, i) => { h += renderWeek(i, entry); });
-      h += '<div class="no-print"><button class="primary" data-action="addweek">+ Tambah minggu berikutnya</button></div>';
+    const y = window.scrollY;
+    let h;
+    if (!namesValid()) h = viewFixNames();
+    else if (state.me == null) h = viewOnboarding();
+    else {
+      h = '<main>' + (ui.tab === 'all' ? viewAll() : ui.tab === 'set' ? viewSet() : viewMe()) + '</main>' + tabbar();
     }
     $app.innerHTML = h;
     document.querySelectorAll('details.card').forEach((d, i) => { if (open[i]) d.open = true; });
+    window.scrollTo(0, y);
   }
+  function go(tab) { ui.tab = tab; render(); window.scrollTo(0, 0); }
 
-  /* ---------- ekspor ---------- */
-  function weekResult(i) {
-    const all = S.computeAll(engineState());
-    return all[i] && all[i].result ? all[i] : null;
-  }
+  /* ---------- teks, berbagi, ekspor ---------- */
   function weekText(i) {
-    const e = weekResult(i); if (!e) return '';
-    const res = e.result, start = S.addDays(state.startDate, i * 7);
+    const e = computed()[i]; if (!e || !e.result) return '';
+    const res = e.result, start = weekStart(i);
     let t = 'JADWAL ' + range(start) + '\nMiddle Sab–Min: ' + res.middle + '\n';
     for (let d = 0; d < 7; d++) {
       const x = res.days[d];
@@ -299,23 +378,15 @@
     }
     return t;
   }
-  function weekCsv(i) {
-    const e = weekResult(i); if (!e) return '';
-    const start = S.addDays(state.startDate, i * 7);
-    const q = (s) => '"' + String(s).replace(/"/g, '""') + '"';
-    const head = ['Nama'].concat(S.DAYS.map((dn, d) => dn + ' ' + dm(S.addDays(start, d))));
-    const lines = [head.map(q).join(',')];
-    names().forEach((n) => {
-      lines.push([n].concat(e.result.assign[n].map((c) => (S.roleOf(c) ? S.shiftOf(c) + ' ' + S.roleOf(c) : S.shiftOf(c)))).map(q).join(','));
+  function myText(i) {
+    const e = computed()[i]; if (!e || !e.result) return '';
+    const me = names()[state.me], start = weekStart(i), codes = e.result.assign[me];
+    let t = 'JADWAL ' + me.toUpperCase() + ' · ' + range(start) + '\n\n';
+    codes.forEach((c, d) => {
+      const inf = info(c);
+      t += S.DAYS[d] + ' ' + dm(S.addDays(start, d)) + ': ' + (inf.key === 'libur' ? 'Libur' : inf.sh + (inf.role ? ' · ' + inf.role : '') + ' (' + inf.time + ')') + '\n';
     });
-    return lines.join('\r\n');
-  }
-  function download(name, text, type) {
-    const blob = new Blob(['﻿' + text], { type });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    return t;
   }
   async function copyText(t) {
     try { await navigator.clipboard.writeText(t); flash('Teks jadwal disalin.'); }
@@ -325,18 +396,74 @@
       ta.remove();
     }
   }
+  async function shareText(title, text) {
+    try {
+      const sh = plugins().Share;
+      if (!sh) throw new Error('no share');
+      await sh.share({ title, text, dialogTitle: 'Bagikan jadwal' });
+    } catch (e) {
+      if (e && /cancel/i.test(String(e.message || e))) return;
+      copyText(text);
+    }
+  }
+  function toBase64(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  async function saveFile(fname, bytes, mime) {
+    if (isNative) {
+      const P = plugins();
+      if (!P.Filesystem || !P.Share) { flash('Fitur simpan file belum tersedia di aplikasi ini.'); return; }
+      try {
+        const r = await P.Filesystem.writeFile({ path: fname, data: toBase64(bytes), directory: 'CACHE' });
+        await P.Share.share({ title: fname, files: [r.uri], dialogTitle: 'Buka dengan WPS Office' });
+      } catch (e) {
+        if (!/cancel/i.test(String(e && e.message || e))) flash('Gagal mengekspor: ' + (e && e.message ? e.message : e));
+      }
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([bytes], { type: mime })); a.download = fname;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    flash('File ' + fname + ' diunduh. Buka dengan WPS Office atau Excel.');
+  }
+  function exportXlsx(i) {
+    const m = sheetModel(i);
+    if (!m) { flash('Jadwal minggu ini belum lengkap.'); return; }
+    saveFile('Jadwal-Mixue-' + weekStart(i) + '.xlsx', X.buildWeekWorkbook(m), XLSX_MIME);
+  }
 
   /* ---------- event ---------- */
+  $app.addEventListener('input', (e) => {
+    if (e.target.dataset && e.target.dataset.field === 'nameDraft') { ui.nameDraft = e.target.value; ui.nameError = ''; }
+  });
+  $app.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.id === 'nameInput') { e.preventDefault(); submitName(); }
+  });
+  function submitName() {
+    const v = ui.nameDraft.trim().toLowerCase();
+    const i = names().findIndex((n) => n.toLowerCase() === v);
+    if (i < 0) {
+      ui.nameError = v ? 'Nama “' + ui.nameDraft.trim() + '” belum ada di daftar. Pilih salah satu di bawah, atau ubah daftar nama.' : 'Ketik namamu dulu.';
+      render(); return;
+    }
+    state.me = i; ui.nameDraft = ''; ui.nameError = ''; ui.tab = 'me'; ui.selDay = null; ui.sel = currentWeekIndex();
+    save(); render(); window.scrollTo(0, 0);
+  }
+
   $app.addEventListener('change', (e) => {
     const el = e.target;
     const f = el.dataset && el.dataset.field;
-    if (!f) return;
+    if (!f || f === 'nameDraft') return;
     const [kind, a, b] = f.split(':');
     const v = el.value;
     const idx = v === '' ? null : Number(v);
     switch (kind) {
       case 'name': state.people[+a] = v.trim(); break;
-      case 'start': if (/^\d{4}-\d{2}-\d{2}$/.test(v)) state.startDate = S.snapToMonday(v); break;
+      case 'me': state.me = idx; break;
+      case 'start': if (/^\d{4}-\d{2}-\d{2}$/.test(v)) { state.startDate = S.snapToMonday(v); ui.sel = currentWeekIndex(); } break;
       case 'gap': {
         const x = Math.max(1, Math.min(14, Math.round(Number(v)) || 1));
         state.settings[a] = x;
@@ -361,25 +488,33 @@
     const [act, a, b] = btn.dataset.action.split(':');
     const i = Number(a);
     switch (act) {
+      case 'tab': go(a); break;
+      case 'gotoset': go('set'); break;
+      case 'wk': ui.sel = Math.max(0, Math.min(state.weeks.length - 1, ui.sel + i)); ui.selDay = null; render(); break;
+      case 'day': ui.selDay = i; render(); break;
+      case 'chname': state.me = null; ui.nameDraft = ''; ui.nameError = ''; render(); window.scrollTo(0, 0); break;
+      case 'pick': ui.nameDraft = names()[i]; submitName(); break;
+      case 'submitname': submitName(); break;
       case 'addweek': {
         state.weeks.push(newWeek());
-        const w = state.weeks.length - 1;
-        if (namesValid()) applySuggestion(w);
-        save(); render();
-        const el = document.getElementById('week-' + w); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        ui.sel = state.weeks.length - 1; ui.selDay = null;
+        if (namesValid()) applySuggestion(ui.sel);
+        save(); render(); window.scrollTo(0, 0);
         break;
       }
-      case 'remove': if (state.weeks.length > 1) { state.weeks.pop(); save(); render(); } break;
+      case 'remove':
+        if (state.weeks.length > 1) { state.weeks.pop(); ui.sel = Math.min(ui.sel, state.weeks.length - 1); save(); render(); }
+        break;
       case 'auto': if (applySuggestion(i)) { save(); render(); } break;
       case 'clear': state.weeks[i].off = [null, null, null, null, null]; save(); render(); break;
       case 'addreq': state.weeks[i].requests.push({ p: 0, day: 0, shift: 'Pagi' }); save(); render(); break;
       case 'delreq': state.weeks[i].requests.splice(Number(b), 1); save(); render(); break;
       case 'copy': copyText(weekText(i)); break;
-      case 'share': nativeShare('Jadwal Mixue Sch', weekText(i)); break;
-      case 'csv': download('jadwal-' + S.addDays(state.startDate, i * 7) + '.csv', weekCsv(i), 'text/csv;charset=utf-8'); break;
-      case 'print': window.print(); break;
+      case 'share': shareText('Jadwal Mixue Sch', weekText(i)); break;
+      case 'sharemy': if (isNative) shareText('Jadwal ' + names()[state.me], myText(i)); else copyText(myText(i)); break;
+      case 'xlsx': exportXlsx(i); break;
       case 'reset':
-        if (window.confirm('Hapus semua data jadwal dan kembali ke awal?')) { state = defaultState(); save(); render(); }
+        if (window.confirm('Hapus semua data jadwal dan kembali ke awal?')) { state = defaultState(); ui.sel = currentWeekIndex(); ui.selDay = null; ui.tab = 'me'; save(); render(); window.scrollTo(0, 0); }
         break;
       default: break;
     }
