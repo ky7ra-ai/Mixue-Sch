@@ -7,6 +7,7 @@ on:
       - 'index.html'
       - 'css/**'
       - 'js/**'
+      - 'img/**'
       - 'package.json'
       - 'capacitor.config.json'
       - '.github/workflows/release-apk.yml'
@@ -50,6 +51,17 @@ jobs:
           npm run build:web
           npx cap add android
           npx cap sync android
+
+      - name: Latar layar peluncuran Android merah (tanpa kedip putih)
+        run: |
+          python3 - <<'PY'
+          import glob, re
+          for f in glob.glob('android/app/src/main/res/values/styles.xml'):
+              s = open(f).read()
+              n = re.sub(r'(<style name="AppTheme\.NoActionBarLaunch"[^>]*>.*?<item name="android:background">)[^<]*(</item>)', r'\g<1>#E71D25\2', s, flags=re.S)
+              print('diubah' if n != s else 'tidak ada perubahan', f)
+              open(f, 'w').write(n)
+          PY
 
       - name: Set versi aplikasi
         run: |

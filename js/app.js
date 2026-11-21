@@ -7,10 +7,11 @@
   const MONTHS_FULL = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
   const SHIFTS = ['Pagi', 'Siang', 'Middle'];
   const TIMES = { Pagi: '08.00–17.00', Middle: '11.00–20.00', Siang: '13.00–22.00' };
-  const DOT = { pagi: '#f4b53d', siang: '#5b9cf0', middle: '#8d6cf0', libur: '#cdc3be' };
+  const DOT = { pagi: '#f4a3a8', siang: '#e4202b', middle: '#7e0f16', libur: '#d9cfcf' };
   const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   const $app = document.getElementById('app');
   const $toast = document.getElementById('toast');
+  const $nav = document.getElementById('nav');
 
   /* ---------- mode aplikasi Android (Capacitor) ---------- */
   const isNative = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
@@ -80,7 +81,7 @@
   function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* abaikan */ } }
   let state = load();
 
-  const ui = { tab: 'me', sel: 0, selDay: null, nameDraft: '', nameError: '', step: 'welcome', myName: '', peopleDraft: ['', '', '', '', ''] };
+  const ui = { fx: false, tab: 'me', sel: 0, selDay: null, nameDraft: '', nameError: '', step: 'welcome', myName: '', peopleDraft: ['', '', '', '', ''] };
   function currentWeekIndex() {
     const diff = Math.floor((S.parseDate(todayISO()) - S.parseDate(state.startDate)) / 864e5 / 7);
     return Math.max(0, Math.min(state.weeks.length - 1, diff));
@@ -177,10 +178,82 @@
       '<div class="lbl">Minggu ' + (w + 1) + '<span>' + esc(range(weekStart(w))) + '</span></div>' +
       '<button class="iconbtn" data-action="wk:1" aria-label="Minggu berikutnya"' + (w >= state.weeks.length - 1 ? ' disabled' : '') + '>›</button></div>';
   }
-  function tabbar() {
-    const t = (id, label, icon) => '<button data-action="tab:' + id + '" class="' + (ui.tab === id ? 'on' : '') + '" aria-label="' + label + '">' + svg(icon) + label + '</button>';
-    return '<nav class="tabbar"><div class="in">' + t('me', 'Jadwalku', 'user') + t('all', 'Lengkap', 'grid') + t('set', 'Atur', 'sliders') + '</div></nav>';
+  /* ---------- navbar bawah: lekukan meluncur ke tab aktif ---------- */
+  const TABS = [['me', 'Jadwalku', 'user'], ['all', 'Lengkap', 'grid'], ['set', 'Atur', 'sliders']];
+  const NOTCH = { w: 48, d: 33, r: 22, cy: 4 }; // lebar bahu, kedalaman, jari-jari lingkaran, pusat-y lingkaran
+  const NAV = { built: false, tab: null, x: 0, raf: 0, bar: null, path: null, orb: null };
+  const eio = (u) => (u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
+  const backOut = (u) => { const c1 = 1.3, c3 = c1 + 1; return 1 + c3 * Math.pow(u - 1, 3) + c1 * Math.pow(u - 1, 2); };
+  const navBtn = (id) => $nav.querySelector('button[data-tab="' + id + '"]');
+  const navIcon = (id) => svg(TABS.filter((t) => t[0] === id)[0][2]);
+
+  function navBuild() {
+    $nav.innerHTML = '<svg class="bar" aria-hidden="true"><path d=""/></svg><div class="in">' +
+      TABS.map((t) => '<button data-action="tab:' + t[0] + '" data-tab="' + t[0] + '" aria-label="' + t[1] + '">' + svg(t[2]) + t[1] + '</button>').join('') +
+      '</div><div class="orb" aria-hidden="true"></div>';
+    $nav.hidden = false;
+    NAV.bar = $nav.querySelector('.bar'); NAV.path = NAV.bar.querySelector('path'); NAV.orb = $nav.querySelector('.orb');
+    NAV.built = true; NAV.tab = null;
   }
+  function navX(id) {
+    const r = navBtn(id).getBoundingClientRect(), n = $nav.getBoundingClientRect();
+    return r.left - n.left + r.width / 2;
+  }
+  // x = pusat lekukan, f = kedalaman (0 rata, 1 penuh, >1 membal)
+  function navDraw(x, f) {
+    const W = $nav.clientWidth, H = $nav.clientHeight;
+    NAV.bar.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    const d = NOTCH.d * f, w = NOTCH.w, xs = x - w, xe = x + w;
+    const fl = (n) => Math.round(n * 100) / 100;
+    NAV.path.setAttribute('d', f < 0.03
+      ? 'M0 0H' + W + 'V' + H + 'H0Z'
+      : 'M0 0H' + fl(xs) + 'C' + fl(xs + 20) + ' 0 ' + fl(x - 28) + ' ' + fl(d) + ' ' + fl(x) + ' ' + fl(d) +
+        'C' + fl(x + 28) + ' ' + fl(d) + ' ' + fl(xe - 20) + ' 0 ' + fl(xe) + ' 0H' + W + 'V' + H + 'H0Z');
+    const g = Math.max(0, Math.min(f, 1.15));
+    const cy = NOTCH.cy + (1 - g) * 22, sc = 0.3 + 0.7 * g;
+    NAV.orb.style.transform = 'translate3d(' + fl(x - NOTCH.r) + 'px,' + fl(cy - NOTCH.r) + 'px,0) scale(' + fl(sc) + ')';
+  }
+  function navMark(id, on) {
+    const b = navBtn(id); if (!b) return;
+    b.classList.toggle('on', on); b.classList.toggle('hid', on);
+  }
+  function navSet(id) { // tanpa animasi
+    cancelAnimationFrame(NAV.raf);
+    TABS.forEach((t) => navMark(t[0], t[0] === id));
+    NAV.orb.innerHTML = navIcon(id); NAV.tab = id; NAV.x = navX(id); navDraw(NAV.x, 1);
+  }
+  function navGo(id) {
+    if (!NAV.built) navBuild();
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (NAV.tab == null || reduce) { navSet(id); return; }
+    if (NAV.tab === id) return;
+    cancelAnimationFrame(NAV.raf);
+    const from = NAV.tab, x0 = NAV.x, x1 = navX(id), t0 = performance.now(), DUR = 680;
+    NAV.tab = id;
+    navMark(from, false); // ikon lama muncul kembali
+    let swapped = false, hid = false;
+    const frame = (now) => {
+      const t = Math.min(1, (now - t0) / DUR);
+      let f, x = x0;
+      if (t < 0.28) f = 1 - 0.9 * eio(t / 0.28);              // lingkaran tenggelam
+      else if (t < 0.62) { f = 0.1; x = x0 + (x1 - x0) * eio((t - 0.28) / 0.34); } // lekukan meluncur
+      else { f = 0.1 + 0.9 * backOut((t - 0.62) / 0.38); x = x1; } // naik lagi, sedikit membal
+      if (t >= 0.5 && !swapped) { swapped = true; NAV.orb.innerHTML = navIcon(id); const b = navBtn(id); if (b) b.classList.add('on'); }
+      if (t >= 0.6 && !hid) { hid = true; const b = navBtn(id); if (b) b.classList.add('hid'); }
+      navDraw(x, f);
+      if (t < 1) NAV.raf = requestAnimationFrame(frame); else { NAV.x = x1; navDraw(x1, 1); }
+    };
+    NAV.raf = requestAnimationFrame(frame);
+  }
+  function navSync(show) {
+    if (!show) {
+      cancelAnimationFrame(NAV.raf); $nav.hidden = true; $nav.innerHTML = ''; NAV.built = false; NAV.tab = null; return;
+    }
+    if (NAV.built && NAV.tab === ui.tab) return;
+    navGo(ui.tab);
+  }
+  window.addEventListener('resize', () => { if (NAV.built && NAV.tab) navSet(NAV.tab); });
+
   function msgBlock(entry) {
     const msgs = [];
     entry.errors.forEach((m) => msgs.push('<div class="msg err">' + esc(m) + '</div>'));
@@ -219,7 +292,7 @@
     h += '<div class="hero"><div><div class="k">' + (dsel === todayIdx ? 'Hari ini · ' : '') + esc(S.DAYS[dsel]) + ', ' + esc(dm(S.addDays(start, dsel))) + '</div>' +
       '<div class="big">' + esc(hi.key === 'libur' ? 'Libur' : hi.sh) + '</div>' +
       '<div class="sub">' + esc(hi.key === 'libur' ? 'Selamat istirahat' : (hi.role ? hi.role + ' · ' : '') + hi.time) + '</div></div>' +
-      '<div style="color:var(--accent)">' + svg(ICON_OF[hi.key], ' width="78" height="78" stroke-width="1.2"') + '</div></div>';
+      '<div style="color:#fff">' + svg(ICON_OF[hi.key], ' width="78" height="78" stroke-width="1.2"') + '</div></div>';
 
     const st = res.stats[me];
     h += '<div class="sumrow"><span class="pill pagi">' + st.Pagi + ' Pagi</span><span class="pill siang">' + st.Siang + ' Siang</span>' +
@@ -376,13 +449,15 @@
     if (!namesValid()) h = state.me != null ? viewFixNames() : (ui.step === 'people' ? viewPeople() : viewWelcome());
     else if (state.me == null) h = viewOnboarding();
     else {
-      h = '<main>' + (ui.tab === 'all' ? viewAll() : ui.tab === 'set' ? viewSet() : viewMe()) + '</main>' + tabbar();
+      h = '<main' + (ui.fx ? ' class="fx"' : '') + '>' + (ui.tab === 'all' ? viewAll() : ui.tab === 'set' ? viewSet() : viewMe()) + '</main>';
     }
+    ui.fx = false;
     $app.innerHTML = h;
+    navSync(namesValid() && state.me != null);
     document.querySelectorAll('details.card').forEach((d, i) => { if (open[i]) d.open = true; });
     window.scrollTo(0, y);
   }
-  function go(tab) { ui.tab = tab; render(); window.scrollTo(0, 0); }
+  function go(tab) { if (tab !== ui.tab) ui.fx = true; ui.tab = tab; render(); window.scrollTo(0, 0); }
 
   /* ---------- teks, berbagi, ekspor ---------- */
   function weekText(i) {
@@ -540,7 +615,7 @@
     save(); render();
   });
 
-  $app.addEventListener('click', (e) => {
+  const onClick = (e) => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     const [act, a, b] = btn.dataset.action.split(':');
@@ -579,7 +654,9 @@
         break;
       default: break;
     }
-  });
+  };
+  $app.addEventListener('click', onClick);
+  $nav.addEventListener('click', onClick);
 
   render();
 })();
