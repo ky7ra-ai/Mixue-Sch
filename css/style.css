@@ -149,6 +149,22 @@ table.jam th { background: #ffe600; font-size: 12px; }
 main.fx { animation: rise .24s ease both; }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
+/* ---- panduan (guide tour) ---- */
+#tour { position: fixed; inset: 0; z-index: 90; }
+#tour .t-block { position: absolute; inset: 0; }
+#tour .t-spot { position: absolute; border-radius: 16px; pointer-events: none; transition: left .3s ease, top .3s ease, width .3s ease, height .3s ease;
+  box-shadow: 0 0 0 9999px rgba(48, 6, 10, .68); outline: 2px solid rgba(255, 255, 255, .9); outline-offset: 2px; }
+#tour .t-card { position: absolute; left: 50%; transform: translateX(-50%); width: min(380px, calc(100vw - 32px)); background: #fff; border-radius: 20px; padding: 16px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .3); transition: top .3s ease, opacity .18s ease; opacity: 0; }
+#tour .t-step { font-size: .72rem; color: var(--accent); font-weight: 700; letter-spacing: .06em; }
+#tour .t-title { font-size: 1.1rem; font-weight: 700; margin: 2px 0 4px; letter-spacing: -.01em; }
+#tour .t-text { color: #5d4446; font-size: .92rem; line-height: 1.45; }
+#tour .t-dots { display: flex; gap: 5px; margin: 12px 0 10px; }
+#tour .t-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--line); transition: all .2s; }
+#tour .t-dots i.on { width: 18px; border-radius: 3px; background: var(--accent); }
+#tour .t-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#tour .t-foot button { padding: 8px 14px; }
+
 /* ---- splash (logo Mixue) ---- */
 #splash { position: fixed; inset: 0; z-index: 100; background: #e71d25; display: grid; place-items: center; transition: opacity .45s ease, visibility .45s; }
 #splash.out { opacity: 0; visibility: hidden; }

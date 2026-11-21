@@ -68,6 +68,7 @@
       startDate: S.snapToMonday(todayISO()),
       weeks: [newWeek()],
       me: null,
+      tourDone: false,
     };
   }
   function load() {
@@ -394,7 +395,7 @@
     h += '<h3>Minggu sebelumnya (opsional)</h3><p class="muted small" style="margin-top:0">Isi bila jadwal sudah berjalan, supaya jarak libur dan rotasi Middle ikut diperhitungkan.</p><div class="grid2">';
     for (let d = 0; d < 5; d++) h += '<label class="field">Libur ' + S.DAYS[d] + '<select data-field="baseOff:' + d + '">' + optionTags(state.baseline.prevOff[d], '—') + '</select></label>';
     h += '<label class="field">Middle minggu lalu<select data-field="baseMid">' + optionTags(state.baseline.prevMiddle, '—') + '</select></label></div>';
-    h += '<div class="row" style="margin-top:16px"><button class="danger" data-action="reset">Reset semua data</button></div></details>';
+    h += '<div class="row" style="margin-top:16px"><button data-action="tour">Lihat panduan</button><button class="danger" data-action="reset">Reset semua data</button></div></details>';
 
     h += '<details class="card"><summary>Aturan yang dipakai</summary><ul class="rules">' +
       '<li>Libur 1x seminggu, hanya Senin–Jumat. Sabtu & Minggu dilarang libur.</li>' +
@@ -458,6 +459,7 @@
     ui.fx = false;
     $app.innerHTML = h;
     navSync(namesValid() && state.me != null);
+    maybeTour();
     document.querySelectorAll('details.card').forEach((d, i) => { if (open[i]) d.open = true; });
     window.scrollTo(0, y);
   }
@@ -533,6 +535,115 @@
     const m = sheetModel(i);
     if (!m) { flash('Jadwal minggu ini belum lengkap.'); return; }
     saveFile('Jadwal-Mixue-' + weekStart(i) + '.xlsx', X.buildWeekWorkbook(m), XLSX_MIME);
+  }
+
+  /* ---------- panduan singkat (guide tour) ---------- */
+  const tour = { active: false, pending: false, i: 0, el: null };
+  function tourSteps() {
+    const me = names()[state.me] || '';
+    return [
+      { tab: 'me', title: 'Selamat datang, ' + me, text: 'Panduan singkat untuk mengenal menu dan cara membuat jadwal. Hanya sebentar.' },
+      { tab: 'me', t: ['#nav .in'], title: 'Tiga menu utama', text: 'Jadwalku: shift kamu selama seminggu. Lengkap: jadwal kelima orang dan ekspor ke WPS. Atur: libur, request, dan pengaturan.' },
+      { tab: 'set', t: ['.offlist'], title: '1. Pilih hari libur', text: 'Tentukan siapa yang libur tiap Senin–Jumat (setiap orang sekali). Sabtu dan Minggu semua masuk. Sistem menyusun Pagi, Siang, Middle, Kasir, dan Piket otomatis.' },
+      { tab: 'set', t: ['[data-action^="auto:"]'], title: 'Isi libur otomatis', text: 'Malas memilih? Tekan tombol ini. Sistem mengisi libur sesuai aturan rolling dan jarak antar minggu.' },
+      { tab: 'set', t: ['[data-action^="addreq:"]'], closest: '.card', title: 'Request masuk shift', text: 'Ingin masuk Pagi, Siang, atau Middle di hari tertentu? Tambahkan di sini. Dipenuhi selama tidak melanggar aturan, kalau tidak bisa akan diberi alasannya.' },
+      { tab: 'set', t: ['[data-action="addweek"]'], title: 'Tambah minggu', text: 'Setelah satu minggu jadi, tambah minggu berikutnya. Hari liburnya disarankan otomatis agar bergilir.' },
+      { tab: 'me', t: ['.weeknav'], title: 'Pindah minggu', text: 'Pakai panah ‹ › untuk melihat minggu sebelumnya atau berikutnya. Berlaku di semua menu.' },
+      { tab: 'me', t: ['.hero', '.empty'], title: 'Jadwalmu', text: 'Setelah jadwal terisi, di sini tampil shift hari ini, tugas (Kasir atau Piket), dan jam kerjanya. Ketuk hari lain untuk melihat detailnya.' },
+      { tab: 'all', t: ['.sheetwrap', '.empty'], closest: '.card', title: 'Jadwal lengkap', text: 'Tabel semua orang dalam seminggu. Kolom putih = kasir, biru = piket, merah = libur.' },
+      { tab: 'all', t: ['[data-action^="xlsx:"]'], title: 'Ekspor ke WPS', text: 'Simpan jadwal sebagai file Excel (.xlsx), lalu buka dengan WPS Office lewat menu bagikan. Tombol ini muncul setelah jadwal minggu itu terisi.' },
+      { tab: 'me', title: 'Siap dipakai!', text: 'Panduan ini bisa dibuka lagi kapan saja di Atur → Pengaturan → Lihat panduan.' },
+    ];
+  }
+  function maybeTour() {
+    if (tour.active || tour.pending || state.tourDone) return;
+    if (!namesValid() || state.me == null) return;
+    tour.pending = true;
+    const wait = () => {
+      if (document.getElementById('splash')) { setTimeout(wait, 250); return; }
+      setTimeout(() => {
+        tour.pending = false;
+        if (!state.tourDone && !tour.active && namesValid() && state.me != null) startTour();
+      }, 500);
+    };
+    wait();
+  }
+  function startTour() {
+    if (tour.active) return;
+    tour.active = true; tour.pending = false;
+    const el = document.createElement('div');
+    el.id = 'tour';
+    el.innerHTML = '<div class="t-block"></div><div class="t-spot"></div><div class="t-card" role="dialog" aria-live="polite"></div>';
+    document.body.appendChild(el);
+    tour.el = el;
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-t]'); if (!b) return;
+      const act = b.dataset.t, n = tourSteps().length;
+      if (act === 'skip') endTour();
+      else if (act === 'prev') tourShow(Math.max(0, tour.i - 1));
+      else if (act === 'next') { if (tour.i >= n - 1) endTour(); else tourShow(tour.i + 1); }
+    });
+    window.addEventListener('resize', tourReflow);
+    tourShow(0);
+  }
+  function endTour() {
+    if (!tour.active) return;
+    tour.active = false;
+    window.removeEventListener('resize', tourReflow);
+    if (tour.el) tour.el.remove();
+    tour.el = null;
+    state.tourDone = true; save();
+    if (ui.tab !== 'me') go('me'); else render();
+    window.scrollTo(0, 0);
+  }
+  function tourFind(st) {
+    if (!st.t) return null;
+    for (const sel of st.t) {
+      let el = document.querySelector(sel);
+      if (el && st.closest && el.closest(st.closest) && sel !== '.empty') el = el.closest(st.closest);
+      if (el) return el;
+    }
+    return null;
+  }
+  function tourShow(i) {
+    const steps = tourSteps();
+    tour.i = i;
+    const st = steps[i];
+    const changed = ui.tab !== st.tab;
+    if (changed) go(st.tab);
+    const card = tour.el.querySelector('.t-card');
+    card.style.opacity = '0';
+    setTimeout(() => { if (tour.active && tour.i === i) tourPlace(); }, changed ? 340 : 40);
+  }
+  function tourReflow() { if (tour.active) tourPlace(true); }
+  function tourPlace(quick) {
+    const steps = tourSteps(), st = steps[tour.i], n = steps.length;
+    const spot = tour.el.querySelector('.t-spot'), card = tour.el.querySelector('.t-card');
+    let dots = '';
+    for (let k = 0; k < n; k++) dots += '<i class="' + (k === tour.i ? 'on' : '') + '"></i>';
+    card.innerHTML = '<div class="t-step">' + (tour.i + 1) + ' / ' + n + '</div><div class="t-title">' + esc(st.title) + '</div><div class="t-text">' + esc(st.text) + '</div>' +
+      '<div class="t-dots">' + dots + '</div><div class="t-foot"><button class="ghost" data-t="skip">' + (tour.i === n - 1 ? '' : 'Lewati') + '</button>' +
+      '<span>' + (tour.i > 0 ? '<button data-t="prev">Kembali</button> ' : '') + '<button class="primary" data-t="next">' + (tour.i === n - 1 ? 'Mulai' : 'Lanjut') + '</button></span></div>';
+    const target = tourFind(st);
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (target) {
+      if (!target.closest('#nav')) target.scrollIntoView({ block: 'center' });
+      const r = target.getBoundingClientRect(), pad = 6;
+      const x = Math.max(4, r.left - pad), y = Math.max(4, r.top - pad);
+      const w = Math.min(vw - 8, r.width + pad * 2) - Math.max(0, 4 - (r.left - pad));
+      spot.style.cssText = 'left:' + x + 'px;top:' + y + 'px;width:' + w + 'px;height:' + (r.height + pad * 2) + 'px;';
+      const ch = card.offsetHeight, below = vh - (y + r.height + pad * 2), above = y;
+      let top;
+      if (below >= ch + 18) top = y + r.height + pad * 2 + 12;
+      else if (above >= ch + 18) top = y - ch - 12;
+      else top = Math.max(12, vh - ch - 12);
+      card.style.top = Math.max(12, Math.min(top, vh - ch - 12)) + 'px';
+    } else {
+      spot.style.cssText = 'left:' + (vw / 2) + 'px;top:' + (vh / 2) + 'px;width:0;height:0;';
+      const ch = card.offsetHeight;
+      card.style.top = Math.max(12, (vh - ch) / 2) + 'px';
+    }
+    card.style.opacity = '1';
   }
 
   /* ---------- event ---------- */
@@ -626,6 +737,7 @@
     const i = Number(a);
     switch (act) {
       case 'tab': go(a); break;
+      case 'tour': startTour(); break;
       case 'gotoset': go('set'); break;
       case 'wk': ui.sel = Math.max(0, Math.min(state.weeks.length - 1, ui.sel + i)); ui.selDay = null; render(); break;
       case 'day': ui.selDay = i; render(); break;
