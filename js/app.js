@@ -17,6 +17,10 @@
   const isNative = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
   if (isNative) document.documentElement.classList.add('native');
   const plugins = () => (window.Capacitor && window.Capacitor.Plugins) || {};
+  // ikon status bar (jam, sinyal, wifi, baterai) hitam agar terbaca di latar terang
+  if (isNative) {
+    try { const sb = plugins().StatusBar; if (sb) { sb.setStyle({ style: 'LIGHT' }); } } catch (e) { /* abaikan */ }
+  }
 
   /* ---------- util ---------- */
   const pad = (n) => String(n).padStart(2, '0');

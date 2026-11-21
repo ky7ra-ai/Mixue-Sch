@@ -152,14 +152,12 @@ main.fx { animation: rise .24s ease both; }
 /* ---- splash (logo Mixue) ---- */
 #splash { position: fixed; inset: 0; z-index: 100; background: #e71d25; display: grid; place-items: center; transition: opacity .45s ease, visibility .45s; }
 #splash.out { opacity: 0; visibility: hidden; }
-#splash .sp-in { display: grid; justify-items: center; gap: 2px; padding-bottom: 4vh; }
+#splash .sp-in { display: grid; justify-items: center; }
 #splash .sp-logo { width: min(80vw, 340px); height: auto; display: block; animation: pop .7s cubic-bezier(.2, .9, .3, 1.2) both;
   -webkit-mask-image: linear-gradient(to right, transparent, #000 5%, #000 95%, transparent), linear-gradient(to bottom, transparent, #000 5%, #000 95%, transparent);
   -webkit-mask-composite: source-in; mask-image: linear-gradient(to right, transparent, #000 5%, #000 95%, transparent), linear-gradient(to bottom, transparent, #000 5%, #000 95%, transparent); mask-composite: intersect; }
-#splash .sp-name { color: #fff; font-size: 1.9rem; font-weight: 750; letter-spacing: .03em; animation: spin-up .6s .3s ease both; }
 @keyframes pop { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: none; } }
-@keyframes spin-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { #splash .sp-logo, #splash .sp-name, main.fx { animation: none; } #splash { transition: none; } }
+@media (prefers-reduced-motion: reduce) { #splash .sp-logo, main.fx { animation: none; } #splash { transition: none; } }
 
 /* ---- onboarding ---- */
 .onb { min-height: 80vh; display: grid; align-content: center; gap: 14px; max-width: 420px; margin: 0 auto; }
