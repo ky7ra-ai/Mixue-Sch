@@ -30,7 +30,7 @@ Data tersimpan di browser (localStorage). Nama bisa diubah di bagian Pengaturan.
 ## APK Android
 
 APK dibuild otomatis oleh GitHub Actions (`.github/workflows/release-apk.yml`) memakai Capacitor.
-Tiap tag `v*` (mis. `v1.0.1`) menghasilkan rilis baru di tab **Releases** berisi file `Mixue-Sch-vX.Y.Z.apk`.
+Tiap perubahan aplikasi yang di-push ke `main` (atau tag `v*`) menghasilkan rilis baru di tab **Releases** berisi file `Mixue-Sch-vX.Y.Z.apk`.
 Bisa juga dijalankan manual lewat Actions → Build & Release APK → Run workflow.
 
 Instal: unduh APK di HP → buka → izinkan instal dari sumber tidak dikenal bila diminta.
