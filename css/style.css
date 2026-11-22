@@ -136,13 +136,13 @@ table.jam th { background: #ffe600; font-size: 12px; }
 
 /* ---- navbar bawah (lekukan meluncur) ---- */
 .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding-bottom: env(safe-area-inset-bottom); pointer-events: none; }
-.tabbar .bar { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 -3px 9px rgba(179, 18, 28, .13)); }
-.tabbar .bar path { fill: #fff; }
+.tabbar .bar { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 -3px 9px rgba(179, 18, 28, .22)); }
+.tabbar .bar path { fill: var(--accent); }
 .tabbar .in { position: relative; max-width: 720px; margin: 0 auto; height: var(--nav-h); display: grid; grid-template-columns: repeat(3, 1fr); padding: 0 8px; pointer-events: auto; }
-.tabbar button { background: transparent; box-shadow: none; border-radius: 14px; display: grid; justify-items: center; align-content: center; gap: 2px; color: var(--muted); font-size: .72rem; padding: 4px 0; margin: 6px 4px; transition: color .2s; }
+.tabbar button { background: transparent; box-shadow: none; border-radius: 14px; display: grid; justify-items: center; align-content: center; gap: 2px; color: rgba(255, 255, 255, .78); font-size: .72rem; padding: 4px 0; margin: 6px 4px; transition: color .2s; }
 .tabbar button svg { width: 24px; height: 24px; transition: opacity .18s; }
 .tabbar button.hid svg { opacity: 0; }
-.tabbar button.on { color: var(--accent); font-weight: 650; }
+.tabbar button.on { color: #fff; font-weight: 650; }
 .tabbar .orb { position: absolute; left: 0; top: 0; width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center;
   box-shadow: 0 0 0 7px var(--bg), 0 7px 14px rgba(228, 32, 43, .32); pointer-events: none; will-change: transform; transform: translate3d(-100px, 0, 0); }
 .tabbar .orb svg { width: 22px; height: 22px; }
