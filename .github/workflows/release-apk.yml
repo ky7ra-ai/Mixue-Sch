@@ -7,6 +7,7 @@ on:
       - 'index.html'
       - 'css/**'
       - 'js/**'
+      - 'runners/**'
       - 'img/**'
       - 'scripts/**'
       - 'package.json'
@@ -42,7 +43,7 @@ jobs:
           java-version: 21
 
       - name: Tes
-        run: node --test test/scheduler.test.js test/sync.test.js
+        run: node --test test/scheduler.test.js test/sync.test.js test/runner.test.js
 
       - name: Pasang dependensi
         run: npm install --no-audit --no-fund

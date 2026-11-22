@@ -786,6 +786,19 @@
     const idx = state.meName ? state.people.indexOf(state.meName) : -1;
     state.me = idx >= 0 && state.people[idx] !== snap.admin ? idx : null;
     ui.sel = Math.max(0, Math.min(state.weeks.length - 1, ui.sel));
+    bgSync(snap);
+  }
+  // Android: beri tahu pemeriksa latar belakang kode & jadwal yang sedang tampil,
+  // supaya notifikasi hanya muncul untuk perubahan baru. Gagal = tidak masalah.
+  const BG_LABEL = 'com.mixue.rakyat.check';
+  let bgAsked = false;
+  function bgSync(snap) {
+    if (!isNative || ROLE !== 'viewer' || !state.code) return;
+    try {
+      const br = plugins().BackgroundRunner; if (!br) return;
+      if (!bgAsked) { bgAsked = true; Promise.resolve(br.requestPermissions({ apis: ['notifications'] })).catch(() => {}); }
+      Promise.resolve(br.dispatchEvent({ label: BG_LABEL, event: 'setState', details: { code: state.code, fp: Y.fingerprint(snap || state.snap) } })).catch(() => {});
+    } catch (e) { /* abaikan */ }
   }
   async function connectCode() {
     if (ui.codeBusy) return;
@@ -809,7 +822,11 @@
       const r = await Y.fetchSnapshot({ gistId: state.code, etag: state.etag });
       state.checkedAt = Date.now(); state.syncErr = '';
       if (r.notModified) { if (manual) flash('Sudah yang terbaru.'); }
-      else { applySnapshot(r.snapshot); state.etag = r.etag; changed = true; if (manual) flash('Jadwal diperbarui.'); }
+      else {
+        const was = state.snap ? Y.fingerprint(state.snap) : '';
+        applySnapshot(r.snapshot); state.etag = r.etag; changed = true;
+        if (manual || (was && was !== Y.fingerprint(r.snapshot))) flash('Jadwal diperbarui oleh admin.');
+      }
     } catch (e) {
       state.syncErr = e.message || 'Gagal memperbarui.'; if (manual) flash(state.syncErr);
     }
@@ -822,6 +839,7 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden) pullNow(false); });
     window.addEventListener('online', () => pullNow(false));
     pullNow(false);
+    if (state.snap) bgSync(state.snap);
   }
   function syncCardViewer() {
     const ok = !state.syncErr;

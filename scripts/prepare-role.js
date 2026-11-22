@@ -15,5 +15,10 @@ fs.writeFileSync(path.join(root, 'www/js/role.js'), `window.MIXUE_ROLE = '${role
 const cfgPath = path.join(root, 'capacitor.config.json');
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
 cfg.appId = r.appId; cfg.appName = r.appName;
+// Pemeriksa jadwal latar belakang: hanya aktif di Rakyat.
+cfg.plugins = Object.assign({}, cfg.plugins, { BackgroundRunner: {
+  label: 'com.mixue.rakyat.check', src: 'runners/runner.js', event: 'checkSchedule',
+  repeat: true, interval: 15, autoStart: role === 'viewer',
+} });
 fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
 console.log('peran', role, '->', r.appName, r.appId);
