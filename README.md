@@ -69,3 +69,19 @@ Tes mencakup seluruh 120 kombinasi libur, 600 kombinasi dengan Senin depan, rant
 ## GitHub Pages
 
 Settings → Pages → Deploy from a branch → `main` / root.
+
+## Dua aplikasi: Mixue Penguasa & Mixue Rakyat
+
+- **Mixue Penguasa** (admin, `com.mixue.sch`): satu-satunya yang membuat/mengubah jadwal.
+- **Mixue Rakyat** (penerima, `com.mixue.rakyat`): hanya melihat; jadwal otomatis ikut berubah (cek tiap 60 detik, saat aplikasi dibuka, dan saat online lagi). Tampilan sama persis, tanpa tombol pembuat jadwal.
+- Pemakai: 1 admin + 4 Rakyat. Admin tidak muncul di daftar pilihan nama Rakyat.
+
+### Cara menyambungkan (sekali saja)
+1. Di GitHub: Settings → Developer settings → Personal access tokens → **Tokens (classic)** → centang hanya `gist` → salin token `ghp_…`.
+2. Penguasa → tab **Atur** → tempel token → Simpan. Muncul **kode sambung**.
+3. Bagikan kode ke 4 orang, di Rakyat tempel kode lalu pilih nama masing-masing.
+
+### Catatan keamanan
+- Jadwal disimpan di Gist rahasia (tidak terdaftar, tetapi siapa pun yang punya kode bisa membaca). Jangan sebar kode ke luar tim.
+- Token hanya tersimpan di HP admin dan tidak pernah masuk ke Rakyat. Token hanya berizin `gist`.
+- APK dibangun otomatis oleh GitHub Actions untuk kedua aplikasi (`scripts/build-apk.sh`).

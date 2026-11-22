@@ -12,6 +12,11 @@
   const $app = document.getElementById('app');
   const $toast = document.getElementById('toast');
   const $nav = document.getElementById('nav');
+  // 'admin' = Mixue Penguasa (membuat jadwal), 'viewer' = Mixue Rakyat (hanya menerima jadwal)
+  const ROLE = window.MIXUE_ROLE === 'viewer' ? 'viewer' : 'admin';
+  const Y = window.MixueSync;
+  const POLL_MS = window.MIXUE_POLL_MS || 60000;
+  document.title = ROLE === 'viewer' ? 'Mixue Rakyat' : 'Mixue Penguasa';
 
   /* ---------- mode aplikasi Android (Capacitor) ---------- */
   const isNative = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
@@ -69,24 +74,32 @@
       weeks: [newWeek()],
       me: null,
       tourDone: false,
+      role: ROLE,
+      // khusus Mixue Rakyat
+      code: '', admin: '', snap: null, etag: '', meName: '', checkedAt: 0, syncAt: 0, syncErr: '',
     };
   }
   function load() {
     try {
       const s = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (s && s.role !== undefined && s.role !== ROLE) return defaultState();
+      if (s && s.role === undefined && ROLE === 'viewer') return defaultState();
       if (s && s.version === 1 && Array.isArray(s.people) && s.people.length === 5 && Array.isArray(s.weeks) && s.weeks.length) {
         // data versi lama memakai 5 nama bawaan: mulai bersih agar tidak ada nama otomatis
         if (s.people.join('|') === 'Ahmad|Ferri|Budi|Tamam|Ainun') return defaultState();
         if (s.me === undefined || s.me === null || !(s.me >= 0 && s.me < 5)) s.me = null;
-        return s;
+        return Object.assign(defaultState(), s, { role: ROLE });
       }
     } catch (e) { /* abaikan */ }
     return defaultState();
   }
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* abaikan */ } }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* abaikan */ }
+    if (ROLE === 'admin') schedulePublish();
+  }
   let state = load();
 
-  const ui = { fx: false, tab: 'me', sel: 0, selDay: null, nameDraft: '', nameError: '', step: 'welcome', myName: '', peopleDraft: ['', '', '', '', ''] };
+  const ui = { codeDraft: '', codeError: '', codeBusy: false, tokenDraft: '', tokenError: '', fx: false, tab: 'me', sel: 0, selDay: null, nameDraft: '', nameError: '', step: 'welcome', myName: '', peopleDraft: ['', '', '', '', ''] };
   function currentWeekIndex() {
     const diff = Math.floor((S.parseDate(todayISO()) - S.parseDate(state.startDate)) / 864e5 / 7);
     return Math.max(0, Math.min(state.weeks.length - 1, diff));
@@ -112,7 +125,12 @@
     };
   }
   let cacheKey = '', cacheVal = null;
+  let vcache = { snap: null, val: [] };
   function computed() {
+    if (ROLE === 'viewer') {
+      if (vcache.snap !== state.snap) vcache = { snap: state.snap, val: state.snap ? Y.toEntries(state.snap) : [] };
+      return vcache.val;
+    }
     const k = JSON.stringify([state.people, state.settings, state.baseline, state.weeks]);
     if (k !== cacheKey) { cacheVal = S.computeAll(engineState()); cacheKey = k; }
     return cacheVal;
@@ -259,6 +277,9 @@
   }
   window.addEventListener('resize', () => { if (NAV.built && NAV.tab) navSet(NAV.tab); });
 
+  function inMain() {
+    return ROLE === 'viewer' ? !!(state.code && state.snap && state.me != null) : (namesValid() && state.me != null);
+  }
   function msgBlock(entry) {
     const msgs = [];
     entry.errors.forEach((m) => msgs.push('<div class="msg err">' + esc(m) + '</div>'));
@@ -267,6 +288,9 @@
     return msgs.length ? '<div class="msgs">' + msgs.join('') + '</div>' : '';
   }
   function emptyState(entry) {
+    if (ROLE === 'viewer') {
+      return '<div class="card empty"><b>Jadwal minggu ini belum dibuat</b>Admin belum membuat jadwal untuk minggu ini. Jadwal akan muncul otomatis begitu admin menyimpannya.</div>';
+    }
     return '<div class="card empty"><b>Jadwal minggu ini belum dibuat</b>Pilih hari libur kelima orang di tab Atur, atau biarkan sistem mengisinya otomatis.' +
       '<br><button class="primary" data-action="gotoset">Buka Atur</button></div>' + (entry && entry.errors.length && entry.errors.some((e) => !/^Pilih 5 orang/.test(e)) ? msgBlock({ errors: entry.errors.filter((e) => !/^Pilih 5 orang/.test(e)), warnings: [], notes: [] }) : '');
   }
@@ -352,6 +376,7 @@
     return h + '</div>';
   }
   function viewSet() {
+    if (ROLE === 'viewer') return viewSetViewer();
     const w = ui.sel, wk = state.weeks[w], entry = computed()[w], start = weekStart(w);
     let h = '<div class="head"><div><h1>Atur Jadwal</h1><div class="date">Libur, request, dan pengaturan</div></div></div>';
     h += weekNav();
@@ -384,6 +409,8 @@
     h += '<div class="row" style="margin-bottom:14px"><button class="primary" data-action="addweek">+ Tambah minggu berikutnya</button>' +
       (w === state.weeks.length - 1 && state.weeks.length > 1 ? '<button class="ghost danger" data-action="remove:' + w + '">Hapus minggu ini</button>' : '') + '</div>';
 
+    h += syncCardAdmin();
+
     // pengaturan
     h += '<details class="card"><summary>Pengaturan</summary>';
     h += '<h3 style="margin-top:0">Aku adalah</h3><select data-field="me">' + optionTags(state.me) + '</select>';
@@ -413,13 +440,15 @@
   /* ---------- tanya nama & perbaiki nama ---------- */
   function viewOnboarding() {
     const n = names();
+    const viewer = ROLE === 'viewer';
     let h = '<div class="onb"><div class="logo" aria-hidden="true">M</div><div><h1>Halo! Siapa namamu?</h1>' +
-      '<p class="muted" style="margin:6px 0 0">Ketik namamu, lalu jadwalmu minggu ini langsung tampil.</p></div>' +
+      '<p class="muted" style="margin:6px 0 0">' + (viewer ? 'Pilih atau ketik namamu, lalu jadwalmu langsung tampil.' : 'Ketik namamu, lalu jadwalmu minggu ini langsung tampil.') + '</p></div>' +
       '<input type="text" id="nameInput" data-field="nameDraft" placeholder="Ketik namamu" autocomplete="off" autocapitalize="words" value="' + esc(ui.nameDraft) + '">';
     if (ui.nameError) h += '<div class="msg err">' + esc(ui.nameError) + '</div>';
-    h += '<div class="chips">' + n.map((x, i) => '<button data-action="pick:' + i + '">' + esc(x) + '</button>').join('') + '</div>' +
+    h += '<div class="chips">' + n.map((x, i) => (viewer && x === state.admin ? '' : '<button data-action="pick:' + i + '">' + esc(x) + '</button>')).join('') + '</div>' +
       '<button class="primary" data-action="submitname" style="padding:12px">Lanjut</button>' +
-      '<details class="card" style="margin:6px 0 0"><summary>Namamu tidak ada? Ubah daftar nama</summary>' + nameInputs() + '</details></div>';
+      (viewer ? '<button class="ghost" data-action="changecode">Ganti kode admin</button></div>'
+        : '<details class="card" style="margin:6px 0 0"><summary>Namamu tidak ada? Ubah daftar nama</summary>' + nameInputs() + '</details></div>');
     return h;
   }
   function viewWelcome() {
@@ -451,14 +480,17 @@
     document.querySelectorAll('details.card').forEach((d, i) => { open[i] = d.open; });
     const y = window.scrollY;
     let h;
-    if (!namesValid()) h = state.me != null ? viewFixNames() : (ui.step === 'people' ? viewPeople() : viewWelcome());
+    const mainHtml = () => '<main' + (ui.fx ? ' class="fx"' : '') + '>' + (ui.tab === 'all' ? viewAll() : ui.tab === 'set' ? viewSet() : viewMe()) + '</main>';
+    if (ROLE === 'viewer') {
+      if (!state.code || !state.snap) h = viewCode();
+      else if (state.me == null) h = viewOnboarding();
+      else h = mainHtml();
+    } else if (!namesValid()) h = state.me != null ? viewFixNames() : (ui.step === 'people' ? viewPeople() : viewWelcome());
     else if (state.me == null) h = viewOnboarding();
-    else {
-      h = '<main' + (ui.fx ? ' class="fx"' : '') + '>' + (ui.tab === 'all' ? viewAll() : ui.tab === 'set' ? viewSet() : viewMe()) + '</main>';
-    }
+    else h = mainHtml();
     ui.fx = false;
     $app.innerHTML = h;
-    navSync(namesValid() && state.me != null);
+    navSync(inMain());
     maybeTour();
     document.querySelectorAll('details.card').forEach((d, i) => { if (open[i]) d.open = true; });
     window.scrollTo(0, y);
@@ -490,11 +522,12 @@
     });
     return t;
   }
-  async function copyText(t) {
-    try { await navigator.clipboard.writeText(t); flash('Teks jadwal disalin.'); }
+  async function copyText(t, msg) {
+    const ok = msg || 'Teks jadwal disalin.';
+    try { await navigator.clipboard.writeText(t); flash(ok); }
     catch (e) {
       const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); flash('Teks jadwal disalin.'); } catch (_) { flash('Gagal menyalin.'); }
+      try { document.execCommand('copy'); flash(ok); } catch (_) { flash('Gagal menyalin.'); }
       ta.remove();
     }
   }
@@ -539,8 +572,21 @@
 
   /* ---------- panduan singkat (guide tour) ---------- */
   const tour = { active: false, pending: false, i: 0, el: null };
+  function viewerSteps(me) {
+    return [
+      { tab: 'me', title: 'Selamat datang, ' + me, text: 'Aplikasi ini menerima jadwal dari admin. Jadwal masuk dan diperbarui otomatis, kamu tidak perlu membuat apa pun.' },
+      { tab: 'me', t: ['#nav .in'], title: 'Tiga menu utama', text: 'Jadwalku: shift kamu selama seminggu. Lengkap: jadwal semua orang dan ekspor ke WPS. Atur: sinkronisasi dan pengaturan.' },
+      { tab: 'me', t: ['.weeknav'], title: 'Pindah minggu', text: 'Pakai panah ‹ › untuk melihat minggu sebelumnya atau berikutnya. Berlaku di semua menu.' },
+      { tab: 'me', t: ['.hero', '.empty'], title: 'Jadwalmu', text: 'Lihat shift hari ini, tugas (Kasir atau Piket), dan jam kerjanya. Ketuk hari lain untuk melihat detailnya. Saat admin mengubah jadwal, tampilan ini ikut berubah sendiri.' },
+      { tab: 'all', t: ['.sheetwrap', '.empty'], closest: '.card', title: 'Jadwal lengkap', text: 'Tabel semua orang dalam seminggu. Kolom putih = kasir, biru = piket, merah = libur.' },
+      { tab: 'all', t: ['[data-action^="xlsx:"]'], title: 'Ekspor ke WPS', text: 'Simpan jadwal sebagai file Excel (.xlsx), lalu buka dengan WPS Office lewat menu bagikan.' },
+      { tab: 'set', t: ['.sync-card'], title: 'Sinkronisasi', text: 'Jadwal dicek otomatis tiap menit saat aplikasi dibuka. Tekan Perbarui sekarang untuk cek manual.' },
+      { tab: 'me', title: 'Siap dipakai!', text: 'Panduan ini bisa dibuka lagi kapan saja di Atur → Pengaturan → Lihat panduan.' },
+    ];
+  }
   function tourSteps() {
     const me = names()[state.me] || '';
+    if (ROLE === 'viewer') return viewerSteps(me);
     return [
       { tab: 'me', title: 'Selamat datang, ' + me, text: 'Panduan singkat untuk mengenal menu dan cara membuat jadwal. Hanya sebentar.' },
       { tab: 'me', t: ['#nav .in'], title: 'Tiga menu utama', text: 'Jadwalku: shift kamu selama seminggu. Lengkap: jadwal kelima orang dan ekspor ke WPS. Atur: libur, request, dan pengaturan.' },
@@ -548,6 +594,7 @@
       { tab: 'set', t: ['[data-action^="auto:"]'], title: 'Isi libur otomatis', text: 'Malas memilih? Tekan tombol ini. Sistem mengisi libur sesuai aturan rolling dan jarak antar minggu.' },
       { tab: 'set', t: ['[data-action^="addreq:"]'], closest: '.card', title: 'Request masuk shift', text: 'Ingin masuk Pagi, Siang, atau Middle di hari tertentu? Tambahkan di sini. Dipenuhi selama tidak melanggar aturan, kalau tidak bisa akan diberi alasannya.' },
       { tab: 'set', t: ['[data-action="addweek"]'], title: 'Tambah minggu', text: 'Setelah satu minggu jadi, tambah minggu berikutnya. Hari liburnya disarankan otomatis agar bergilir.' },
+      { tab: 'set', t: ['.sync-card'], title: 'Kirim ke Mixue Rakyat', text: 'Hubungkan sekali dengan token GitHub. Setelah itu setiap jadwal yang kamu buat otomatis dikirim ke aplikasi Mixue Rakyat. Bagikan kodenya ke 4 anggota lain.' },
       { tab: 'me', t: ['.weeknav'], title: 'Pindah minggu', text: 'Pakai panah ‹ › untuk melihat minggu sebelumnya atau berikutnya. Berlaku di semua menu.' },
       { tab: 'me', t: ['.hero', '.empty'], title: 'Jadwalmu', text: 'Setelah jadwal terisi, di sini tampil shift hari ini, tugas (Kasir atau Piket), dan jam kerjanya. Ketuk hari lain untuk melihat detailnya.' },
       { tab: 'all', t: ['.sheetwrap', '.empty'], closest: '.card', title: 'Jadwal lengkap', text: 'Tabel semua orang dalam seminggu. Kolom putih = kasir, biru = piket, merah = libur.' },
@@ -557,13 +604,13 @@
   }
   function maybeTour() {
     if (tour.active || tour.pending || state.tourDone) return;
-    if (!namesValid() || state.me == null) return;
+    if (!inMain()) return;
     tour.pending = true;
     const wait = () => {
       if (document.getElementById('splash')) { setTimeout(wait, 250); return; }
       setTimeout(() => {
         tour.pending = false;
-        if (!state.tourDone && !tour.active && namesValid() && state.me != null) startTour();
+        if (!state.tourDone && !tour.active && inMain()) startTour();
       }, 500);
     };
     wait();
@@ -646,15 +693,176 @@
     card.style.opacity = '1';
   }
 
+  /* ---------- sinkronisasi admin -> Rakyat ---------- */
+  const SYNC_KEY = 'mixue-sch-sync';
+  const SYNC_DEFAULT = { token: '', gistId: '', hash: '', at: 0, err: '' };
+  let sync = (function () {
+    try { const o = JSON.parse(localStorage.getItem(SYNC_KEY) || 'null'); if (o && typeof o === 'object') return Object.assign({}, SYNC_DEFAULT, o); } catch (e) { /* abaikan */ }
+    return Object.assign({}, SYNC_DEFAULT);
+  })();
+  function saveSync() { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) { /* abaikan */ } }
+  const hhmm = (ts) => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace('.', ':');
+  const pub = { timer: 0, retry: 0, busy: false, again: false };
+
+  function schedulePublish(delay) {
+    if (ROLE !== 'admin' || !sync.token) return;
+    clearTimeout(pub.timer);
+    pub.timer = setTimeout(() => publishNow(false), delay == null ? 1200 : delay);
+  }
+  function adminSnapshot() {
+    if (!namesValid() || state.me == null) return null;
+    return Y.buildSnapshot({ admin: names()[state.me], people: names(), startDate: state.startDate, weeks: computed() });
+  }
+  async function publishNow(force) {
+    if (ROLE !== 'admin' || !sync.token) return;
+    const snap = adminSnapshot();
+    if (!snap) return;
+    const fp = Y.fingerprint(snap);
+    if (!force && sync.gistId && fp === sync.hash && !sync.err) return;
+    if (pub.busy) { pub.again = true; return; }
+    pub.busy = true; clearTimeout(pub.retry); refreshSyncCard();
+    try {
+      const r = await Y.publish({ token: sync.token, gistId: sync.gistId, snapshot: snap });
+      sync.gistId = r.id; sync.hash = fp; sync.at = Date.now(); sync.err = '';
+    } catch (e) {
+      sync.err = e.message || 'Gagal mengirim.';
+      if (e.kind === 'notfound' && sync.gistId) { sync.gistId = ''; sync.err = 'Penyimpanan lama hilang, dibuat ulang. Bagikan kode baru ke anggota.'; pub.retry = setTimeout(() => publishNow(true), 800); }
+      else if (e.kind !== 'auth') pub.retry = setTimeout(() => publishNow(true), 30000);
+    } finally {
+      pub.busy = false; saveSync(); refreshSyncCard();
+      if (pub.again) { pub.again = false; schedulePublish(300); }
+    }
+  }
+  function saveToken() {
+    const t = String(ui.tokenDraft || '').trim();
+    if (!/^(ghp_|github_pat_|gho_)[A-Za-z0-9_]{20,}$/.test(t)) {
+      ui.tokenError = 'Token tidak dikenali. Salin token utuh dari GitHub (diawali ghp_).'; render(); return;
+    }
+    sync.token = t; sync.err = ''; ui.tokenDraft = ''; ui.tokenError = ''; saveSync(); render(); publishNow(true);
+  }
+  function syncStatusAdmin() {
+    if (!sync.token) return ['off', 'Belum terhubung'];
+    if (pub.busy) return ['busy', 'Mengirim jadwal…'];
+    if (sync.err) return ['err', sync.err];
+    if (sync.at) return ['ok', 'Terhubung · terakhir terkirim ' + hhmm(sync.at)];
+    return ['busy', 'Menunggu pengiriman pertama…'];
+  }
+  function syncCardAdmin() {
+    const st = syncStatusAdmin();
+    let h = '<div class="card sync-card"><h2>Kirim ke Mixue Rakyat</h2><div class="sync-st ' + st[0] + '"><i class="sdot"></i><span>' + esc(st[1]) + '</span></div>';
+    if (sync.token) {
+      h += '<p class="muted small" style="margin:4px 0 0">Setiap perubahan jadwal otomatis dikirim ke aplikasi Mixue Rakyat.</p>';
+      h += '<h3>Kode untuk anggota</h3>';
+      if (sync.gistId) {
+        h += '<div class="code">' + esc(sync.gistId) + '</div><div class="row" style="margin-top:10px"><button class="accent" data-action="' + (isNative ? 'sharecode' : 'copycode') + '">' + (isNative ? 'Bagikan kode' : 'Salin kode') + '</button>' +
+          (isNative ? '<button data-action="copycode">Salin</button>' : '') + '</div>';
+      } else h += '<p class="muted small" style="margin:0">Kode muncul setelah jadwal pertama terkirim.</p>';
+      h += '<div class="row" style="margin-top:14px"><button data-action="syncnow">Kirim ulang sekarang</button><button class="ghost danger" data-action="disconnect">Putuskan</button></div>';
+    } else {
+      h += '<p class="muted small" style="margin:6px 0 8px">Supaya jadwal otomatis sampai ke Mixue Rakyat, hubungkan sekali ke akun GitHub-mu:</p>' +
+        '<ol class="rules small"><li><a href="https://github.com/settings/tokens/new?scopes=gist&description=Mixue%20Penguasa" target="_blank" rel="noopener">Buat token GitHub</a>, login, lalu tekan <b>Generate token</b> (izin gist sudah terpilih).</li>' +
+        '<li>Salin token yang muncul (diawali <b>ghp_</b>), tempel di bawah.</li></ol>' +
+        '<input type="password" id="tokenInput" data-field="tokenDraft" placeholder="Tempel token di sini" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(ui.tokenDraft) + '" style="margin-top:8px">';
+      if (ui.tokenError) h += '<div class="msg err" style="margin-top:8px">' + esc(ui.tokenError) + '</div>';
+      h += '<div class="row" style="margin-top:10px"><button class="primary" data-action="savetoken">Simpan & hubungkan</button></div>';
+    }
+    return h + '</div>';
+  }
+  function refreshSyncCard() {
+    if (ROLE === 'admin') {
+      const el = document.querySelector('.sync-card');
+      if (el && !(document.activeElement && el.contains(document.activeElement) && document.activeElement.tagName === 'INPUT')) el.outerHTML = syncCardAdmin();
+    } else {
+      const el = document.querySelector('.sync-card');
+      if (el) el.outerHTML = syncCardViewer();
+    }
+  }
+
+  /* ---------- penerimaan di Mixue Rakyat ---------- */
+  const pull = { busy: false };
+  function applySnapshot(snap) {
+    state.snap = snap; state.people = snap.people.slice(); state.admin = snap.admin; state.startDate = snap.startDate;
+    state.weeks = snap.weeks.map(() => newWeek()); state.syncAt = Date.now();
+    const idx = state.meName ? state.people.indexOf(state.meName) : -1;
+    state.me = idx >= 0 && state.people[idx] !== snap.admin ? idx : null;
+    ui.sel = Math.max(0, Math.min(state.weeks.length - 1, ui.sel));
+  }
+  async function connectCode() {
+    if (ui.codeBusy) return;
+    const code = Y.parseCode(ui.codeDraft);
+    if (!code) { ui.codeError = 'Kode tidak dikenali. Tempel kode dari admin.'; render(); return; }
+    ui.codeBusy = true; ui.codeError = ''; render();
+    try {
+      const r = await Y.fetchSnapshot({ gistId: code, etag: '' });
+      state.code = code; state.etag = r.etag; state.meName = ''; state.me = null;
+      applySnapshot(r.snapshot); state.checkedAt = Date.now(); state.syncErr = '';
+      ui.codeDraft = ''; ui.sel = currentWeekIndex(); save();
+    } catch (e) { ui.codeError = e.message || 'Gagal terhubung.'; }
+    ui.codeBusy = false; render();
+  }
+  async function pullNow(manual) {
+    if (ROLE !== 'viewer' || !state.code || pull.busy) return;
+    pull.busy = true;
+    const prevErr = state.syncErr;
+    let changed = !!manual;
+    try {
+      const r = await Y.fetchSnapshot({ gistId: state.code, etag: state.etag });
+      state.checkedAt = Date.now(); state.syncErr = '';
+      if (r.notModified) { if (manual) flash('Sudah yang terbaru.'); }
+      else { applySnapshot(r.snapshot); state.etag = r.etag; changed = true; if (manual) flash('Jadwal diperbarui.'); }
+    } catch (e) {
+      state.syncErr = e.message || 'Gagal memperbarui.'; if (manual) flash(state.syncErr);
+    }
+    pull.busy = false; save();
+    if (state.syncErr !== prevErr) changed = true;
+    if (changed) { if (tour.active) { render(); tourReflow(); } else render(); }
+  }
+  function startPolling() {
+    setInterval(() => { if (!document.hidden) pullNow(false); }, POLL_MS);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) pullNow(false); });
+    window.addEventListener('online', () => pullNow(false));
+    pullNow(false);
+  }
+  function syncCardViewer() {
+    const ok = !state.syncErr;
+    let h = '<div class="card sync-card"><h2>Sinkronisasi dengan admin</h2><div class="sync-st ' + (ok ? 'ok' : 'err') + '"><i class="sdot"></i><span>' +
+      (ok ? 'Terhubung ke admin (' + esc(state.admin) + ')' : esc(state.syncErr)) + '</span></div>';
+    h += '<p class="muted small" style="margin:4px 0 0">Jadwal diperbarui otomatis.' +
+      (state.snap && state.snap.updatedAt ? ' Perubahan admin terakhir: ' + esc(hhmm(Date.parse(state.snap.updatedAt))) + '.' : '') +
+      (state.checkedAt ? ' Dicek: ' + esc(hhmm(state.checkedAt)) + '.' : '') + '</p>';
+    return h + '<div class="row" style="margin-top:12px"><button class="accent" data-action="pullnow">Perbarui sekarang</button></div></div>';
+  }
+  function viewCode() {
+    let h = '<div class="onb"><div class="logo" aria-hidden="true">M</div><div><h1>Hubungkan ke admin</h1>' +
+      '<p class="muted" style="margin:6px 0 0">Minta kode dari admin (aplikasi Mixue Penguasa → Atur → Kirim ke Mixue Rakyat), lalu tempel di sini. Cukup sekali.</p></div>' +
+      '<input type="text" id="codeInput" data-field="codeDraft" placeholder="Tempel kode di sini" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(ui.codeDraft) + '"' + (ui.codeBusy ? ' disabled' : '') + '>';
+    if (ui.codeError) h += '<div class="msg err">' + esc(ui.codeError) + '</div>';
+    return h + '<button class="primary" data-action="connect" style="padding:12px"' + (ui.codeBusy ? ' disabled' : '') + '>' + (ui.codeBusy ? 'Menghubungkan…' : 'Hubungkan') + '</button></div>';
+  }
+  function viewSetViewer() {
+    let h = '<div class="head"><div><h1>Atur</h1><div class="date">Sinkronisasi dan pengaturan</div></div></div>';
+    h += syncCardViewer();
+    const opts = names().map((n, i) => (n === state.admin ? '' : '<option value="' + i + '"' + (state.me === i ? ' selected' : '') + '>' + esc(n) + '</option>')).join('');
+    h += '<details class="card"><summary>Pengaturan</summary><h3 style="margin-top:0">Aku adalah</h3><select data-field="me">' + opts + '</select>' +
+      '<h3>Kode admin</h3><div class="code">' + esc(state.code) + '</div>' +
+      '<div class="row" style="margin-top:14px"><button data-action="changecode">Ganti kode</button><button data-action="tour">Lihat panduan</button></div>' +
+      '<div class="row" style="margin-top:10px"><button class="danger" data-action="reset">Keluar & hapus data</button></div></details>';
+    return h;
+  }
+
   /* ---------- event ---------- */
   $app.addEventListener('input', (e) => {
     const f = e.target.dataset && e.target.dataset.field;
     if (f === 'nameDraft') { ui.nameDraft = e.target.value; ui.nameError = ''; }
     else if (f && f.indexOf('pd:') === 0) { ui.peopleDraft[+f.slice(3)] = e.target.value; ui.nameError = ''; }
+    else if (f === 'codeDraft') { ui.codeDraft = e.target.value; ui.codeError = ''; }
+    else if (f === 'tokenDraft') { ui.tokenDraft = e.target.value; ui.tokenError = ''; }
   });
   $app.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
-    if (e.target.id === 'nameInput') { e.preventDefault(); if (!namesValid() && state.me == null) welcomeNext(); else submitName(); }
+    if (e.target.id === 'codeInput') { e.preventDefault(); connectCode(); }
+    else if (e.target.id === 'tokenInput') { e.preventDefault(); saveToken(); }
+    else if (e.target.id === 'nameInput') { e.preventDefault(); if (ROLE === 'admin' && !namesValid() && state.me == null) welcomeNext(); else submitName(); }
     else if (e.target.dataset && e.target.dataset.field && e.target.dataset.field.indexOf('pd:') === 0) {
       e.preventDefault();
       const next = $app.querySelector('[data-field="pd:' + (Number(e.target.dataset.field.slice(3)) + 1) + '"]');
@@ -694,10 +902,14 @@
     const v = ui.nameDraft.trim().toLowerCase();
     const i = names().findIndex((n) => n.toLowerCase() === v);
     if (i < 0) {
-      ui.nameError = v ? 'Nama “' + ui.nameDraft.trim() + '” belum ada di daftar. Pilih salah satu di bawah, atau ubah daftar nama.' : 'Ketik namamu dulu.';
+      ui.nameError = v ? 'Nama “' + ui.nameDraft.trim() + '” belum ada di daftar. Pilih salah satu di bawah' + (ROLE === 'viewer' ? ', atau minta admin menambahkan namamu.' : ', atau ubah daftar nama.') : 'Ketik namamu dulu.';
       render(); return;
     }
-    state.me = i; ui.nameDraft = ''; ui.nameError = ''; ui.tab = 'me'; ui.selDay = null; ui.sel = currentWeekIndex();
+    if (ROLE === 'viewer' && names()[i] === state.admin) {
+      ui.nameError = '“' + names()[i] + '” adalah admin. Admin memakai aplikasi Mixue Penguasa.';
+      render(); return;
+    }
+    state.me = i; state.meName = names()[i]; ui.nameDraft = ''; ui.nameError = ''; ui.tab = 'me'; ui.selDay = null; ui.sel = currentWeekIndex();
     save(); render(); window.scrollTo(0, 0);
   }
 
@@ -710,7 +922,7 @@
     const idx = v === '' ? null : Number(v);
     switch (kind) {
       case 'name': state.people[+a] = v.trim(); break;
-      case 'me': state.me = idx; break;
+      case 'me': state.me = idx; state.meName = idx == null ? '' : names()[idx]; break;
       case 'start': if (/^\d{4}-\d{2}-\d{2}$/.test(v)) { state.startDate = S.snapToMonday(v); ui.sel = currentWeekIndex(); } break;
       case 'gap': {
         const x = Math.max(1, Math.min(14, Math.round(Number(v)) || 1));
@@ -738,10 +950,25 @@
     switch (act) {
       case 'tab': go(a); break;
       case 'tour': startTour(); break;
+      case 'connect': connectCode(); break;
+      case 'changecode':
+        state.code = ''; state.snap = null; state.etag = ''; state.meName = ''; state.me = null; state.admin = '';
+        state.people = ['', '', '', '', '']; state.weeks = [newWeek()]; ui.codeError = ''; save(); render(); window.scrollTo(0, 0);
+        break;
+      case 'pullnow': pullNow(true); break;
+      case 'savetoken': saveToken(); break;
+      case 'syncnow': publishNow(true); break;
+      case 'disconnect':
+        if (window.confirm('Putuskan sinkronisasi? Token dihapus dari aplikasi ini. Mixue Rakyat tidak menerima pembaruan lagi sampai kamu menghubungkan lagi.')) {
+          sync.token = ''; sync.err = ''; saveSync(); render();
+        }
+        break;
+      case 'copycode': copyText(sync.gistId, 'Kode disalin. Kirim ke anggota lain.'); break;
+      case 'sharecode': shareText('Kode Mixue Rakyat', 'Kode Mixue Rakyat:\n' + sync.gistId + '\n\nBuka aplikasi Mixue Rakyat, lalu tempel kode ini.'); break;
       case 'gotoset': go('set'); break;
       case 'wk': ui.sel = Math.max(0, Math.min(state.weeks.length - 1, ui.sel + i)); ui.selDay = null; render(); break;
       case 'day': ui.selDay = i; render(); break;
-      case 'chname': state.me = null; ui.nameDraft = ''; ui.nameError = ''; render(); window.scrollTo(0, 0); break;
+      case 'chname': state.me = null; state.meName = ''; ui.nameDraft = ''; ui.nameError = ''; render(); window.scrollTo(0, 0); break;
       case 'pick': ui.nameDraft = names()[i]; submitName(); break;
       case 'welcomenext': welcomeNext(); break;
       case 'peopleback': ui.step = 'welcome'; ui.nameDraft = ui.myName; ui.nameError = ''; render(); break;
@@ -775,4 +1002,10 @@
   $nav.addEventListener('click', onClick);
 
   render();
+  if (ROLE === 'viewer') startPolling();
+  else {
+    schedulePublish(2500);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) schedulePublish(500); });
+    window.addEventListener('online', () => schedulePublish(500));
+  }
 })();

@@ -8,6 +8,7 @@ on:
       - 'css/**'
       - 'js/**'
       - 'img/**'
+      - 'scripts/**'
       - 'package.json'
       - 'capacitor.config.json'
       - '.github/workflows/release-apk.yml'
@@ -40,70 +41,32 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Tes jadwal
-        run: node --test test/scheduler.test.js
+      - name: Tes
+        run: node --test test/scheduler.test.js test/sync.test.js
 
       - name: Pasang dependensi
         run: npm install --no-audit --no-fund
 
-      - name: Siapkan proyek Android
-        run: |
-          npm run build:web
-          npx cap add android
-          npx cap sync android
+      - name: Bangun Mixue Penguasa (admin)
+        run: bash scripts/build-apk.sh admin "$TAG" "$GITHUB_RUN_NUMBER"
 
-      - name: Latar layar peluncuran Android merah (tanpa kedip putih)
-        run: |
-          python3 - <<'PY'
-          import glob, re
-          for f in glob.glob('android/app/src/main/res/values/styles.xml'):
-              s = open(f).read()
-              n = re.sub(r'(<style name="AppTheme\.NoActionBarLaunch"[^>]*>.*?<item name="android:background">)[^<]*(</item>)', r'\g<1>#E71D25\2', s, flags=re.S)
-              print('splash:', 'diubah' if n != s else 'tidak ada perubahan', f)
-              if 'windowLightStatusBar' not in n:
-                  n = re.sub(r'(<style name="(?:AppTheme|AppTheme\.NoActionBar)"[^>]*>)', r'\1\n        <item name="android:windowLightStatusBar">true</item>', n)
-              print('status bar ikon gelap:', 'ya' if 'windowLightStatusBar' in n else 'tidak')
-              open(f, 'w').write(n)
-              print(n)
-          PY
-
-      - name: Set versi aplikasi
-        run: |
-          VERSION="${TAG#v}"
-          sed -i "s/versionCode 1/versionCode ${GITHUB_RUN_NUMBER}/; s/versionName \"1.0\"/versionName \"${VERSION}\"/" android/app/build.gradle
-          grep -nE "versionCode|versionName" android/app/build.gradle
-
-      - name: Build APK (release, belum ditandatangani)
-        working-directory: android
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
-
-      - name: Zipalign & tanda tangan APK
-        run: |
-          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
-          SRC="$(find android/app/build/outputs/apk/release -name '*.apk' | head -1)"
-          echo "Build-tools: $BT"; echo "APK mentah: $SRC"
-          mkdir -p dist
-          "$BT/zipalign" -f -p 4 "$SRC" dist/aligned.apk
-          "$BT/apksigner" sign --ks signing/mixue-sch.jks --ks-pass pass:mixuesch --key-pass pass:mixuesch \
-            --out "dist/Mixue-Sch-${TAG}.apk" dist/aligned.apk
-          "$BT/apksigner" verify --verbose "dist/Mixue-Sch-${TAG}.apk"
-          rm -f dist/aligned.apk dist/*.idsig
-          ls -la dist
+      - name: Bangun Mixue Rakyat (penerima)
+        run: bash scripts/build-apk.sh viewer "$TAG" "$GITHUB_RUN_NUMBER"
 
       - name: Unggah artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Mixue-Sch-${{ env.TAG }}
+          name: Mixue-APK-${{ env.TAG }}
           path: dist/*.apk
 
       - name: Publikasikan ke GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          APK="dist/Mixue-Sch-${TAG}.apk"
+          ls -la dist
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$APK" --clobber
+            gh release upload "$TAG" dist/*.apk --clobber
           else
-            gh release create "$TAG" "$APK" --target "${GITHUB_SHA}" --title "Mixue Sch ${TAG}" \
-              --notes "APK Android Mixue Sch ${TAG}. Unduh file .apk di bawah, buka di HP, izinkan instal dari sumber tidak dikenal bila diminta."
+            gh release create "$TAG" dist/*.apk --target "${GITHUB_SHA}" --title "Mixue ${TAG}" \
+              --notes "Dua aplikasi: Mixue Penguasa (admin, membuat jadwal) dan Mixue Rakyat (penerima, jadwal otomatis ikut berubah). Unduh .apk di bawah."
           fi

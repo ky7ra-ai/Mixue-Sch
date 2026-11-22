@@ -149,6 +149,19 @@ table.jam th { background: #ffe600; font-size: 12px; }
 main.fx { animation: rise .24s ease both; }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
+/* ---- sinkronisasi ---- */
+.sync-st { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: .92rem; margin: 6px 0 2px; }
+.sync-st span { min-width: 0; }
+.sdot { width: 9px; height: 9px; border-radius: 50%; background: #cdbfc0; flex: none; }
+.sync-st.ok .sdot { background: #22a35a; }
+.sync-st.err .sdot { background: var(--accent); }
+.sync-st.err { color: var(--err-ink); font-weight: 500; }
+.sync-st.busy .sdot { background: #f1a620; animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: .3; } }
+.code { font-family: ui-monospace, Menlo, Consolas, monospace; background: var(--bg); border: 1px dashed var(--line); border-radius: 12px; padding: 10px 12px; font-size: .88rem; word-break: break-all; user-select: all; -webkit-user-select: all; }
+.sync-card a { color: var(--accent); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .sdot { animation: none !important; } }
+
 /* ---- panduan (guide tour) ---- */
 #tour { position: fixed; inset: 0; z-index: 90; }
 #tour .t-block { position: absolute; inset: 0; }
